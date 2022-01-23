@@ -136,10 +136,28 @@ namespace Hybrid7z
 
 			bool thereIsNullTask = false;
 			var taskList = new List<Task>();
+			var map = new Dictionary<string, string?>();
 
 			foreach (var path in paths)
 			{
-				string currentTargetName = path[(path.LastIndexOf('\\') + 1)..];
+				string currentTargetName = ExtractTargetName(path);
+				taskList.Add(phase.RebuildFileList(path, currentTargetName + ".").ContinueWith(task => map.Add(currentTargetName, task.Result)));
+			}
+
+			PrintConsoleAndTitle("Waiting for all asynchronous file-list re-building processes are finished...");
+
+			var tick = Environment.TickCount;
+			var allTask = Task.WhenAll(taskList);
+			allTask.Wait();
+
+			Console.WriteLine($"All asynchronous file-list re-building processes are finished! (Took {Environment.TickCount - tick}ms)");
+
+
+			taskList.Clear();
+
+			foreach (var path in paths)
+			{
+				string currentTargetName = ExtractTargetName(path);
 				string archiveFileName = $"{(includeRoot ? "" : "..\\")}{currentTargetName}.7z";
 
 				// var tupleArray = new (string, string, string[]?)[] { ("PPMd", PPMD_REBUILDED_LIST, ppmdList), ("LZMA2", LZMA2_REBUILDED_LIST, lzma2List), ("Copy", COPY_REBUILDED_LIST, copyList), ("x86", X86_REBUILDED_LIST, x86List) };
@@ -148,9 +166,9 @@ namespace Hybrid7z
 
 				PrintConsoleAndTitle($"Re-building file list for \"{path}\"");
 
-				string? fileListPath = phase.RebuildFileList(path, currentTargetName + ".");
+				//string? fileListPath = phase.RebuildFileList(path, currentTargetName + ".");
 
-				if (fileListPath != null)
+				if (map.TryGetValue(currentTargetName, out string? fileListPath) && fileListPath != null)
 				{
 					PrintConsoleAndTitle($"Start processing \"{path}\"");
 					Console.WriteLine();
@@ -171,14 +189,13 @@ namespace Hybrid7z
 				Console.WriteLine("<<==================== <~> <$> ====================>>");
 			}
 
-			PrintConsoleAndTitle("Waiting until all asynchronous processes are finished...");
+			PrintConsoleAndTitle("Waiting for all asynchronous compression processes are finished...");
 
-			var tick = Environment.TickCount;
-
-			var allTask = Task.WhenAll(taskList);
+			tick = Environment.TickCount;
+			allTask = Task.WhenAll(taskList);
 			allTask.Wait();
 
-			Console.WriteLine($"All asynchronous processes are finished! (Took {Environment.TickCount - tick}ms)");
+			Console.WriteLine($"All asynchronous compression processes are finished! (Took {Environment.TickCount - tick}ms)");
 
 			return thereIsNullTask || allTask.IsFaulted;
 		}
@@ -204,7 +221,7 @@ namespace Hybrid7z
 
 				if (phase.isTerminal)
 					error = phase.PerformPhase(path, titlePrefix, $"-r {string.Join(" ", rebuildedFileLists.ConvertAll((from) => $"-xr@\"{from}\""))} -- \"{archiveFileName}\" \"{(includeRoot ? currentTargetName : "*")}\"") || error;
-				else if (((fileListPath = phase.RebuildFileList(path)) != null))
+				else if ((fileListPath = phase.RebuildFileList(path).Result) != null)
 				{
 					error = phase.PerformPhase(path, titlePrefix, $"-ir@\"{fileListPath}\" -- \"{archiveFileName}\"") || error;
 					rebuildedFileLists.Add(fileListPath);
@@ -306,6 +323,26 @@ namespace Hybrid7z
 		//		}
 		//	}
 		//}
+
+
+		public static void TrimTrailingPathSeparators(ref string path)
+		{
+			while (path.EndsWith("\\"))
+				path = path[(path.LastIndexOf('\\') + 1)..];
+		}
+
+		public static string ExtractTargetName(string path)
+		{
+			TrimTrailingPathSeparators(ref path);
+			return path[(path.LastIndexOf('\\') + 1)..];
+		}
+
+		public static string ExtractSuperDirectoryName(string path)
+		{
+			TrimTrailingPathSeparators(ref path);
+			return path[..(path.LastIndexOf('\\') + 1)];
+		}
+
 	}
 
 	public class Config
@@ -384,64 +421,52 @@ namespace Hybrid7z
 				Console.WriteLine($"Phase filter file not found for phase: {filelistPath}");
 		}
 
-		private void TrimTrailingPathSeparators(ref string path)
-		{
-			while (path.EndsWith("\\"))
-				path = path[(path.LastIndexOf('\\') + 1)..];
-		}
-
-		private string ExtractTargetName(string path)
-		{
-			TrimTrailingPathSeparators(ref path);
-			return path[(path.LastIndexOf('\\') + 1)..];
-		}
-
-		private string ExtractSuperDirectoryName(string path)
-		{
-			TrimTrailingPathSeparators(ref path);
-			return path[..(path.LastIndexOf('\\') + 1)];
-		}
-
-		public string? RebuildFileList(string path, string? prefix = null)
+		public Task<string?> RebuildFileList(string path, string? prefix = null)
 		{
 			if (isTerminal || config == null || filterElements == null)
-				return null;
+				return Task.FromResult((string?)null);
 
 			bool includeRoot = config.IncludeRootDirectory;
-			string targetDirectoryName = ExtractTargetName(path);
+			string targetDirectoryName = Program.ExtractTargetName(path);
 
-			var newFilterElements = new List<string>();
-
-			foreach (var filter in filterElements)
+			return Task.Run(() =>
 			{
-				try
-				{
-					if (Directory.EnumerateFiles(path, filter, SearchOption.AllDirectories).Any())
-						newFilterElements.Add((includeRoot ? targetDirectoryName + "\\" : "") + filter);
-				}
-				catch (Exception ex)
-				{
-					Console.WriteLine($"Error re-building file list: {ex}");
-				}
-			}
+				var newFilterElements = new List<string>();
+				var tasks = new List<Task>();
+				foreach (var filter in filterElements)
+					tasks.Add(Task.Run(() =>
+					{
+						try
+						{
+							if (Directory.EnumerateFiles(path, filter, SearchOption.AllDirectories).Any())
+								newFilterElements.Add((includeRoot ? targetDirectoryName + "\\" : "") + filter);
+						}
+						catch (Exception ex)
+						{
+							Console.WriteLine($"Error re-building file list: {ex}");
+						}
+					}));
 
-			string? fileListPath = null;
+				Task.WhenAll(tasks.ToArray()).Wait();
 
-			if (newFilterElements.Count > 0)
-			{
-				try
-				{
-					File.WriteAllLines(fileListPath = currentExecutablePath + (prefix ?? "") + phaseName + rebuildedFileListSuffix, newFilterElements);
-				}
-				catch (Exception ex)
-				{
-					Console.WriteLine($"Error writing re-builded file list: {ex}");
-				}
-			}
-			else
-				Console.WriteLine("Rebuild-WARNING: There's no file matching extension");
+				string? fileListPath = null;
 
-			return fileListPath;
+				if (newFilterElements.Any())
+				{
+					try
+					{
+						File.WriteAllLines(fileListPath = currentExecutablePath + (prefix ?? "") + phaseName + rebuildedFileListSuffix, newFilterElements);
+					}
+					catch (Exception ex)
+					{
+						Console.WriteLine($"Error writing re-builded file list: {ex}");
+					}
+				}
+				else
+					Console.WriteLine("Rebuild-WARNING: There's no file matching extension");
+
+				return fileListPath;
+			});
 		}
 
 		public Task? PerformPhaseAsync(string path, string extraParameters)
@@ -449,7 +474,7 @@ namespace Hybrid7z
 			if (config == null)
 				return null;
 
-			string currentTargetName = ExtractTargetName(path);
+			string currentTargetName = Program.ExtractTargetName(path);
 
 			Console.WriteLine($">> ===== ----- {phaseName} Phase (Async) ----- ===== <<");
 			Program.PrintConsoleAndTitle($"Queued \"{currentTargetName}\" - {phaseName} Phase");
@@ -461,7 +486,7 @@ namespace Hybrid7z
 			{
 				Process sevenzip = new();
 				sevenzip.StartInfo.FileName = config.SevenZipExecutable;
-				sevenzip.StartInfo.WorkingDirectory = $"{(config.IncludeRootDirectory ? ExtractSuperDirectoryName(path) : path)}\\";
+				sevenzip.StartInfo.WorkingDirectory = $"{(config.IncludeRootDirectory ? Program.ExtractSuperDirectoryName(path) : path)}\\";
 				sevenzip.StartInfo.Arguments = $"{config.CommonArguments} {phaseParameter} {extraParameters}";
 				sevenzip.StartInfo.UseShellExecute = true;
 
@@ -484,7 +509,7 @@ namespace Hybrid7z
 			if (config == null)
 				return false;
 
-			string currentTargetName = ExtractTargetName(path);
+			string currentTargetName = Program.ExtractTargetName(path);
 
 			Console.WriteLine($">> ===== -----<< {phaseName} Phase >>----- ===== <<");
 			Program.PrintConsoleAndTitle($"{indexPrefix} Started {indexPrefix} \"{currentTargetName}\" - {phaseName} Phase");
@@ -499,7 +524,7 @@ namespace Hybrid7z
 
 				Process sevenzip = new();
 				sevenzip.StartInfo.FileName = config.SevenZipExecutable;
-				sevenzip.StartInfo.WorkingDirectory = $"{(config.IncludeRootDirectory ? ExtractSuperDirectoryName(path) : path)}\\";
+				sevenzip.StartInfo.WorkingDirectory = $"{(config.IncludeRootDirectory ? Program.ExtractSuperDirectoryName(path) : path)}\\";
 				sevenzip.StartInfo.Arguments = $"{config.CommonArguments} {phaseParameter} {extraParameters}";
 				sevenzip.StartInfo.UseShellExecute = false;
 				//sevenzip.StartInfo.RedirectStandardOutput = true;
