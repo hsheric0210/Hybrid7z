@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Hybrid7z": {
+      "commandName": "Project",
+      "commandLineArgs": "\"D:\\Repo\\Hybrid7z\\Hybrid7z\\bin\\Debug\\net6.0\\ref\""
+    }
+  }
+}

@@ -1,0 +1,15 @@
+D:\Repo\Hybrid7z\Hybrid7z\bin\Debug\net6.0\Hybrid7z.exe
+D:\Repo\Hybrid7z\Hybrid7z\bin\Debug\net6.0\Hybrid7z.deps.json
+D:\Repo\Hybrid7z\Hybrid7z\bin\Debug\net6.0\Hybrid7z.runtimeconfig.json
+D:\Repo\Hybrid7z\Hybrid7z\bin\Debug\net6.0\Hybrid7z.dll
+D:\Repo\Hybrid7z\Hybrid7z\bin\Debug\net6.0\ref\Hybrid7z.dll
+D:\Repo\Hybrid7z\Hybrid7z\bin\Debug\net6.0\Hybrid7z.pdb
+D:\Repo\Hybrid7z\Hybrid7z\obj\Debug\net6.0\Hybrid7z.csproj.AssemblyReference.cache
+D:\Repo\Hybrid7z\Hybrid7z\obj\Debug\net6.0\Hybrid7z.GeneratedMSBuildEditorConfig.editorconfig
+D:\Repo\Hybrid7z\Hybrid7z\obj\Debug\net6.0\Hybrid7z.AssemblyInfoInputs.cache
+D:\Repo\Hybrid7z\Hybrid7z\obj\Debug\net6.0\Hybrid7z.AssemblyInfo.cs
+D:\Repo\Hybrid7z\Hybrid7z\obj\Debug\net6.0\Hybrid7z.csproj.CoreCompileInputs.cache
+D:\Repo\Hybrid7z\Hybrid7z\obj\Debug\net6.0\Hybrid7z.dll
+D:\Repo\Hybrid7z\Hybrid7z\obj\Debug\net6.0\ref\Hybrid7z.dll
+D:\Repo\Hybrid7z\Hybrid7z\obj\Debug\net6.0\Hybrid7z.pdb
+D:\Repo\Hybrid7z\Hybrid7z\obj\Debug\net6.0\Hybrid7z.genruntimeconfig.cache
