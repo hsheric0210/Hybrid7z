@@ -158,27 +158,34 @@ namespace Hybrid7z
 		private void ProcessDirectory(string path, string titlePrefix)
 		{
 			string currentDirName = path.Substring(path.LastIndexOf('\\') + 1);
-
-			string pathPrefix = (includeRoot ? "" : "..\\");
-			string archiveName = $"{pathPrefix}{currentDirName}.7z";
+			string archiveName = $"{(includeRoot ? "" : "..\\")}{currentDirName}.7z";
 
 			var rebuildedFileLists = new (string, string, string[]?)[] { ("PPMd", "PPMd.filelist.txt", ppmdList), ("LZMA2", "LZMA2.filelist.txt", lzma2List), ("Copy", "Copy.filelist.txt", copyList), ("x86", "x86.filelist.txt", x86List) };
+
+			Console.WriteLine($"Re-building file list for {path}");
+
 			RebuildFileList(path, currentDirName, rebuildedFileLists);
+
+			Console.WriteLine($"Start processing {path}");
+			Console.WriteLine();
 
 			string flzma2Exclude = "";
 
 			foreach (var (phaseName, fileName, _) in rebuildedFileLists)
 			{
-				if (File.Exists(fileName))
+				if (File.Exists(currentDirectory + fileName))
 				{
-					flzma2Exclude += $"-xr@\"{pathPrefix}{fileName}\"";
-					PerformPhase(phaseName, path, titlePrefix, $"-ir@\"{pathPrefix}{fileName}\" -- \"{archiveName}\" \"{(includeRoot ? currentDirName : "*")}\"");
+					flzma2Exclude += $"-xr@\"{currentDirectory}{fileName}\"";
+					PerformPhase(phaseName, path, titlePrefix, $"-ir@\"{currentDirectory}{fileName}\" -- \"{archiveName}\" \"{(includeRoot ? currentDirName : "*")}\"");
 				}
 			}
 
 			// TODO: Check any files to compress with FastLZMA2
 
 			PerformPhase("FastLZMA2", path, titlePrefix, $"-r {flzma2Exclude} -- \"{archiveName}\" \"{(includeRoot ? currentDirName : "*")}\"");
+
+			Console.WriteLine();
+			Console.WriteLine($"Finished processing {path}");
 		}
 
 		private void PerformPhase(string phaseName, string path, string titlePrefix, string extraParameters)
@@ -200,7 +207,7 @@ namespace Hybrid7z
 				sevenzip.StartInfo.Arguments = $"{config.Read("BaseArgs")} {config.Read($"Args_{phaseName}")} {extraParameters}";
 				sevenzip.StartInfo.UseShellExecute = false;
 
-				Console.WriteLine("7z.exe - " + sevenzip.StartInfo.FileName);
+				Console.WriteLine("Params: " + sevenzip.StartInfo.Arguments);
 
 				sevenzip.Start();
 

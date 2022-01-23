@@ -1,7 +1,0 @@
-**.exe
-**.dll
-**.sys
-**.scr
-**.ocx
-**.msi
-**.msu
