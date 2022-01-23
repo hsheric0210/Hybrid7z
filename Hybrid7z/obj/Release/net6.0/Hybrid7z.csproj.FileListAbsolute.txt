@@ -12,3 +12,4 @@ D:\Repo\Hybrid7z\Hybrid7z\obj\Release\net6.0\Hybrid7z.dll
 D:\Repo\Hybrid7z\Hybrid7z\obj\Release\net6.0\ref\Hybrid7z.dll
 D:\Repo\Hybrid7z\Hybrid7z\obj\Release\net6.0\Hybrid7z.pdb
 D:\Repo\Hybrid7z\Hybrid7z\obj\Release\net6.0\Hybrid7z.genruntimeconfig.cache
+D:\Repo\Hybrid7z\Hybrid7z\obj\Release\net6.0\Hybrid7z.csproj.AssemblyReference.cache

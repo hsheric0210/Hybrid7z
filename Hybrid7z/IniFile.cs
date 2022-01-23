@@ -1,5 +1,4 @@
-﻿using System.IO;
-using System.Reflection;
+﻿using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -8,8 +7,8 @@ namespace Hybrid7z
 {
 	class IniFile   // revision 11
 	{
-		string Path;
-		string EXE = Assembly.GetExecutingAssembly().GetName().Name ?? "Program";
+		readonly string Path;
+		readonly string EXE = Assembly.GetExecutingAssembly().GetName().Name ?? "Program";
 
 		[DllImport("kernel32", CharSet = CharSet.Unicode)]
 		static extern long WritePrivateProfileString(string Section, string? Key, string? Value, string FilePath);

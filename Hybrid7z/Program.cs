@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.IO;
-using System.Reflection;
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Diagnostics;
 
 namespace Hybrid7z
@@ -64,7 +59,7 @@ namespace Hybrid7z
 			if (!File.Exists(cd + "Hybrid7z.ini"))
 			{
 				Console.WriteLine("Writing default config");
-				SetupDefaultConfiguration();
+				SetupDefaultConfiguration(cd);
 			}
 
 			new Program(cd, args);
@@ -74,7 +69,7 @@ namespace Hybrid7z
 		{
 			currentDirectory = currentdir;
 
-			config = new IniFile("Hybrid7z.ini");
+			config = new IniFile($"{currentDirectory}Hybrid7z.ini");
 			includeRoot = !String.Equals(config.Read("IncludeRootDirectory"), "0");
 
 			Console.Title = "Reading file lists...";
@@ -98,9 +93,15 @@ namespace Hybrid7z
 			}
 
 			if (error)
+			{
 				Console.WriteLine("One or more file(s) failed to process");
+				Console.BackgroundColor = ConsoleColor.DarkRed;
+			}
 			else
+			{
 				Console.WriteLine("All files are successfully proceed without any error(s).");
+				Console.BackgroundColor = ConsoleColor.DarkBlue;
+			}
 			Console.WriteLine("Press any key to exit program...");
 			Console.ReadKey();
 
@@ -115,9 +116,9 @@ namespace Hybrid7z
 			}
 		}
 
-		private static void SetupDefaultConfiguration()
+		private static void SetupDefaultConfiguration(string currentDir)
 		{
-			var ini = new IniFile("Hybrid7z.ini");
+			var ini = new IniFile($"{currentDir}Hybrid7z.ini");
 			ini.Write("7z", "7z.exe");
 			ini.Write("BaseArgs", "a -t7z -mhe -ms=1g -mqs -slp -bt -bb3 -sae");
 			ini.Write("Args_PPMd", "-m0=PPMd -mx=9 -myx=9 -mmem=1024m -mo=32 -mmt=1");
@@ -198,7 +199,11 @@ namespace Hybrid7z
 				sevenzip.StartInfo.WorkingDirectory = cd + "\\";
 				sevenzip.StartInfo.Arguments = $"{config.Read("BaseArgs")} {config.Read($"Args_{phaseName}")} {extraParameters}";
 				sevenzip.StartInfo.UseShellExecute = false;
+
+				Console.WriteLine("7z.exe - " + sevenzip.StartInfo.FileName);
+
 				sevenzip.Start();
+
 
 				sevenzip.WaitForExit();
 
@@ -240,7 +245,7 @@ namespace Hybrid7z
 					try
 					{
 						if (Directory.EnumerateFiles(path, filter, SearchOption.AllDirectories).Any())
-							newFilterList.Add((includeRoot ? currentDirName + "\\" : "")+ filter);
+							newFilterList.Add((includeRoot ? currentDirName + "\\" : "") + filter);
 					}
 					catch (Exception ex)
 					{
