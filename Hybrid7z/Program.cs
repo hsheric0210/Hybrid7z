@@ -1,5 +1,6 @@
 ﻿using System.Runtime.InteropServices;
 using System.Diagnostics;
+using System.Text;
 
 namespace Hybrid7z
 {
@@ -7,92 +8,86 @@ namespace Hybrid7z
 	{
 		public const string VERSION = "0.1";
 
-		public string currentDirectory;
+		public readonly Phase[] phases;
+		public readonly string currentExecutablePath;
+		private readonly Config config;
 
+		public List<string> rebuildedFileLists = new List<string>();
 
-		public string[]? ppmdList = null;
-		public string[]? lzma2List = null;
-		public string[]? copyList = null;
-		public string[]? x86List = null;
-
-		private IniFile config;
-		private bool includeRoot;
-
-		public bool error;
-
-		[Flags]
-		public enum MatchPatternFlags : uint
-		{
-			Normal = 0x00000000,   // PMSF_NORMAL
-			Multiple = 0x00000001,   // PMSF_MULTIPLE
-			DontStripSpaces = 0x00010000    // PMSF_DONT_STRIP_SPACES
-		}
-
-		[DllImport("Shlwapi.dll", SetLastError = false)]
-		static extern int PathMatchSpecExW([MarshalAs(UnmanagedType.LPWStr)] string file,
-								   [MarshalAs(UnmanagedType.LPWStr)] string spec,
-								   MatchPatternFlags flags);
-
-		private static bool MatchPattern(string file, string spec, MatchPatternFlags flags)
-		{
-			if (String.IsNullOrEmpty(file))
-				return false;
-
-			if (String.IsNullOrEmpty(spec))
-				return true;
-
-			int result = PathMatchSpecExW(file, spec, flags);
-
-			return (result == 0);
-		}
+		public bool anyErrors;
 
 		public static void Main(string[] args)
 		{
-			Console.WriteLine($"Hybrid7z v{VERSION}");
-			Console.WriteLine("Original idea inspired from https://superuser.com/questions/311937/how-do-i-create-separate-zip-files-for-each-selected-file-directory-in-7zip");
-			Console.WriteLine("Ported from Windows Batch file version");
+			Console.WriteLine($"Hybrid7z v{VERSION} - A hybrid 7-zip compressor");
 
-			string cd = AppDomain.CurrentDomain.BaseDirectory;
+			string currentExecutablePath = AppDomain.CurrentDomain.BaseDirectory;
 
-			Console.WriteLine($"Current executable path is \"{cd}\"");
-
-			if (!File.Exists(cd + "Hybrid7z.ini"))
+			// Check configuration file is exists
+			if (!File.Exists(currentExecutablePath + "Hybrid7z.ini"))
 			{
 				Console.WriteLine("Writing default config");
-				SetupDefaultConfiguration(cd);
+				SaveDefaultConfig(currentExecutablePath);
 			}
 
-			new Program(cd, args);
+			// Start the program
+			new Program(currentExecutablePath, args);
 		}
 
-		public Program(string currentdir, string[] param)
+		public Program(string currentExecutablePath, string[] param)
 		{
-			currentDirectory = currentdir;
+			this.currentExecutablePath = currentExecutablePath;
 
-			config = new IniFile($"{currentDirectory}Hybrid7z.ini");
-			includeRoot = !String.Equals(config.Read("IncludeRootDirectory"), "0");
+			config = new Config(new IniFile($"{currentExecutablePath}Hybrid7z.ini"));
 
-			Console.Title = "Reading file lists...";
-			PrepairFileLists();
+			phases = new Phase[5];
+			phases[0] = new Phase("PPMd", false, true);
+			phases[1] = new Phase("Copy", false, true);
+			phases[2] = new Phase("LZMA2", false, false);
+			phases[3] = new Phase("x86", false, false);
+			phases[4] = new Phase("FastLZMA2", true, false);
+
+			foreach (var phase in phases)
+			{
+				PrintConsoleAndTitle($"Initializing phase: {phase.phaseName}");
+				phase.Init(currentExecutablePath, config);
+				phase.ReadFileList();
+			}
 
 			int totalFileCount = param.Length;
+			var targets = new List<string>();
+
+			foreach (string targetPath in param)
+			{
+				// string titlePrefix = $"[{currentFileIndex}/{totalFileCount}]";
+
+				if (Directory.Exists(targetPath))
+					targets.Add(targetPath);
+				// anyErrors = ProcessDirectory(filename, titlePrefix) || anyErrors;
+				else if (File.Exists(targetPath))
+					Console.WriteLine($"WARNING: Currently, file are not supported (only directories are supported) - \"{targetPath}\"");
+				else
+					Console.WriteLine($"WARNING: File not exists - \"{targetPath}\"");
+			}
+
+			var multithreadedPhases = new List<Phase>();
+			foreach (var phase in phases)
+			{
+				if (phase.isSingleThreaded)
+					anyErrors = RunSinglethreadedPhase(phase, targets) || anyErrors;
+				else
+					multithreadedPhases.Add(phase);
+			}
 
 			int currentFileIndex = 1;
-			foreach (string filename in param)
+			foreach (var target in targets)
 			{
-				string titlePrefix = String.Format("[{0}/{1}] ", currentFileIndex, totalFileCount);
-				if (Directory.Exists(filename))
-				{
-					ProcessDirectory(filename, titlePrefix);
-				}
-				else if (File.Exists(filename))
-					Console.WriteLine($"WARNING: Currently, file are not supported (only directories are supported) - \"{filename}\"");
-				else
-					Console.WriteLine($"WARNING: File not exists - \"{filename}\"");
+				string titlePrefix = $"[{currentFileIndex}/{totalFileCount}]";
+				anyErrors = RunMultithreadedPhase(multithreadedPhases, target, titlePrefix) || anyErrors;
 				currentFileIndex++;
 			}
 
-			if (error)
+			// Print process result
+			if (anyErrors)
 			{
 				Console.WriteLine("One or more file(s) failed to process");
 				Console.BackgroundColor = ConsoleColor.DarkRed;
@@ -105,18 +100,18 @@ namespace Hybrid7z
 			Console.WriteLine("Press any key to exit program...");
 			Console.ReadKey();
 
-			var fileLists = new string[] { "PPMd.filelist.txt", "LZMA2.filelist.txt", "Copy.filelist.txt", "x86.filelist.txt" };
-			foreach (string filename in fileLists)
+			// Delete any left-over filelist files
+			foreach (string filelist in rebuildedFileLists)
 			{
-				if (File.Exists(currentDirectory + filename))
+				if (File.Exists(filelist))
 				{
-					File.Delete(currentDirectory + filename);
-					Console.WriteLine($"Deleted {currentDirectory}{filename}");
+					File.Delete(filelist);
+					Console.WriteLine($"Deleted {filelist}");
 				}
 			}
 		}
 
-		private static void SetupDefaultConfiguration(string currentDir)
+		private static void SaveDefaultConfig(string currentDir)
 		{
 			var ini = new IniFile($"{currentDir}Hybrid7z.ini");
 			ini.Write("7z", "7z.exe");
@@ -129,149 +124,461 @@ namespace Hybrid7z
 			ini.Write("IncludeRootDirectory", "0");
 		}
 
-		private void PrepairFileLists()
+		public static void PrintConsoleAndTitle(string message)
 		{
-			var fileList = new (string filename, Action<string[]> apply)[] { ("PPMd.txt", list => ppmdList = list), ("LZMA2.txt", list => lzma2List = list), ("Copy.txt", list => copyList = list), ("x86.txt", list => x86List = list) };
-
-			foreach (var (filename, apply) in fileList)
-			{
-				string path = currentDirectory + filename;
-				if (File.Exists(path))
-				{
-					Console.WriteLine($"Reading file list: {path}");
-					try
-					{
-						Console.Title = $"Reading file list - {filename}";
-
-						// TODO: Asynchronize
-						string[] listElements = File.ReadAllLines(path);
-						apply(listElements);
-					}
-					catch (Exception ex)
-					{
-						Console.WriteLine($"Error reading file: {ex.ToString()}");
-					}
-				}
-			}
+			Console.WriteLine(message);
+			Console.Title = message;
 		}
 
-		private void ProcessDirectory(string path, string titlePrefix)
+		private bool RunSinglethreadedPhase(Phase phase, IEnumerable<string> paths)
 		{
-			string currentDirName = path.Substring(path.LastIndexOf('\\') + 1);
-			string archiveName = $"{(includeRoot ? "" : "..\\")}{currentDirName}.7z";
+			bool includeRoot = config.IncludeRootDirectory;
 
-			var rebuildedFileLists = new (string, string, string[]?)[] { ("PPMd", "PPMd.filelist.txt", ppmdList), ("LZMA2", "LZMA2.filelist.txt", lzma2List), ("Copy", "Copy.filelist.txt", copyList), ("x86", "x86.filelist.txt", x86List) };
+			bool thereIsNullTask = false;
+			var taskList = new List<Task>();
 
-			Console.WriteLine($"Re-building file list for {path}");
+			foreach (var path in paths)
+			{
+				string currentTargetName = path[(path.LastIndexOf('\\') + 1)..];
+				string archiveFileName = $"{(includeRoot ? "" : "..\\")}{currentTargetName}.7z";
 
-			RebuildFileList(path, currentDirName, rebuildedFileLists);
+				// var tupleArray = new (string, string, string[]?)[] { ("PPMd", PPMD_REBUILDED_LIST, ppmdList), ("LZMA2", LZMA2_REBUILDED_LIST, lzma2List), ("Copy", COPY_REBUILDED_LIST, copyList), ("x86", X86_REBUILDED_LIST, x86List) };
 
-			Console.WriteLine($"Start processing {path}");
+				Console.WriteLine("<<==================== <*> ====================>>");
+
+				PrintConsoleAndTitle($"Re-building file list for \"{path}\"");
+
+				string? fileListPath = phase.RebuildFileList(path, currentTargetName + ".");
+
+				if (fileListPath != null)
+				{
+					PrintConsoleAndTitle($"Start processing \"{path}\"");
+					Console.WriteLine();
+
+					var task = phase.PerformPhaseAsync(path, $"-ir@\"{fileListPath}\" -- \"{archiveFileName}\"");
+
+					if (task != null)
+						taskList.Add(task);
+					else
+						thereIsNullTask = true;
+
+					rebuildedFileLists.Add(fileListPath);
+
+					Console.WriteLine();
+					PrintConsoleAndTitle($"Finished processing {path}");
+				}
+
+				Console.WriteLine("<<==================== <~> <$> ====================>>");
+			}
+
+			PrintConsoleAndTitle("Waiting until all asynchronous processes are finished...");
+
+			var tick = Environment.TickCount;
+
+			var allTask = Task.WhenAll(taskList);
+			allTask.Wait();
+
+			Console.WriteLine($"All asynchronous processes are finished! (Took {Environment.TickCount - tick}ms)");
+
+			return thereIsNullTask || allTask.IsFaulted;
+		}
+
+		private bool RunMultithreadedPhase(IEnumerable<Phase> phases, string path, string titlePrefix)
+		{
+			bool includeRoot = config.IncludeRootDirectory;
+			string currentTargetName = path[(path.LastIndexOf('\\') + 1)..];
+			string archiveFileName = $"{(includeRoot ? "" : "..\\")}{currentTargetName}.7z";
+
+			bool error = false;
+
+			// var tupleArray = new (string, string, string[]?)[] { ("PPMd", PPMD_REBUILDED_LIST, ppmdList), ("LZMA2", LZMA2_REBUILDED_LIST, lzma2List), ("Copy", COPY_REBUILDED_LIST, copyList), ("x86", X86_REBUILDED_LIST, x86List) };
+
+			Console.WriteLine("<<=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= <*> =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=>>");
+
+			PrintConsoleAndTitle($"{titlePrefix} Start processing \"{path}\"");
 			Console.WriteLine();
 
-			string flzma2Exclude = "";
-
-			foreach (var (phaseName, fileName, _) in rebuildedFileLists)
+			foreach (var phase in phases)
 			{
-				if (File.Exists(currentDirectory + fileName))
+				string? fileListPath = null; // = $"{currentExecutablePath}{phase.phaseName}{Phase.rebuildedFileListSuffix}";
+
+				if (phase.isTerminal)
+					error = phase.PerformPhase(path, titlePrefix, $"-r {string.Join(" ", rebuildedFileLists.ConvertAll((from) => $"-xr@\"{from}\""))} -- \"{archiveFileName}\" \"{(includeRoot ? currentTargetName : "*")}\"") || error;
+				else if (((fileListPath = phase.RebuildFileList(path)) != null))
 				{
-					flzma2Exclude += $"-xr@\"{currentDirectory}{fileName}\" ";
-					PerformPhase(phaseName, path, titlePrefix, $"-ir@\"{currentDirectory}{fileName}\" -- \"{archiveName}\"");
+					error = phase.PerformPhase(path, titlePrefix, $"-ir@\"{fileListPath}\" -- \"{archiveFileName}\"") || error;
+					rebuildedFileLists.Add(fileListPath);
+				}
+				else
+					PrintConsoleAndTitle($"(MT) There's no files to apply {phase.phaseName} {path}");
+			}
+
+			Console.WriteLine();
+			PrintConsoleAndTitle($"{titlePrefix} Finished processing {path}");
+
+			Console.WriteLine("<<=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= <$> <~> =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=>>");
+
+			return error;
+		}
+
+		//private void PerformPhase(string phaseName, string path, string titlePrefix, string extraParameters)
+		//{
+		//	string currentTargetName = path[(path.LastIndexOf('\\') + 1)..];
+
+		//	Console.Title = $"{titlePrefix}Compressing \"{path}\" - {phaseName} phase";
+
+		//	Console.WriteLine("==================================");
+		//	PrintConsoleAndTitle($"{titlePrefix} \"{currentTargetName}\" - {phaseName} Phase");
+		//	Console.WriteLine();
+
+		//	int errcode = -1;
+
+		//	try
+		//	{
+		//		Process sevenzip = new Process();
+		//		sevenzip.StartInfo.FileName = config.Read("7z");
+		//		sevenzip.StartInfo.WorkingDirectory = $"{(includeRoot ? currentExecutablePath : path)}\\";
+		//		sevenzip.StartInfo.Arguments = $"{config.Read("BaseArgs")} {config.Read($"Args_{phaseName}")} {extraParameters}";
+		//		sevenzip.StartInfo.UseShellExecute = false;
+
+		//		Console.WriteLine("Params: " + sevenzip.StartInfo.Arguments);
+
+		//		sevenzip.Start();
+
+		//		sevenzip.WaitForExit();
+
+		//		errcode = sevenzip.ExitCode;
+		//	}
+		//	catch (Exception ex)
+		//	{
+		//		Console.WriteLine("Exception while executing 7z: " + ex.ToString());
+		//	}
+
+		//	if (errcode != 0)
+		//	{
+		//		Console.Title = $"{titlePrefix}Error compressing \"{path}\" - {phaseName} phase";
+
+		//		Console.BackgroundColor = ConsoleColor.DarkRed;
+		//		Console.WriteLine($"Compression finished with errors/warnings. (error code {errcode})");
+		//		Console.WriteLine("Check the error message and press any key to continue.");
+		//		Console.ReadKey();
+
+		//		Console.BackgroundColor = ConsoleColor.Black;
+		//		anyErrors = true;
+		//	}
+
+		//	Console.WriteLine();
+		//	Console.WriteLine();
+		//	PrintConsoleAndTitle($"{titlePrefix} \"{currentTargetName}\" - {phaseName} Phase Finished.");
+		//}
+
+		//private void RebuildFileList(string path, string currentDirName, (string, string, string[]?)[] fileList)
+		//{
+
+		//	foreach (var (_, filename, list) in fileList)
+		//	{
+		//		if (list == null) continue;
+
+		//		var newFilterList = new List<string>();
+		//		foreach (var filter in list)
+		//		{
+		//			try
+		//			{
+		//				if (Directory.EnumerateFiles(path, filter, SearchOption.AllDirectories).Any())
+		//					newFilterList.Add((includeRoot ? currentDirName + "\\" : "") + filter);
+		//			}
+		//			catch (Exception ex)
+		//			{
+		//				Console.WriteLine($"Error rebuilding file list: {ex.ToString()}");
+		//			}
+		//		}
+
+		//		if (newFilterList.Count > 0)
+		//		{
+		//			try
+		//			{
+		//				File.WriteAllLines(currentExecutablePath + filename, newFilterList);
+		//			}
+		//			catch (Exception ex)
+		//			{
+		//				Console.WriteLine($"Error writing rebuilded file list: {ex.ToString()}");
+		//			}
+		//		}
+		//	}
+		//}
+	}
+
+	public class Config
+	{
+		private readonly IniFile config;
+
+		public string SevenZipExecutable;
+		public string CommonArguments;
+		public bool IncludeRootDirectory;
+
+		public Config(IniFile config)
+		{
+			this.config = config;
+
+			SevenZipExecutable = config.Read("7z");
+			CommonArguments = config.Read("BaseArgs");
+			IncludeRootDirectory = !String.Equals(config.Read("IncludeRootDirectory"), "0");
+		}
+
+		public string GetPhaseSpecificParameters(string phaseName)
+		{
+			return config.Read($"Args_{phaseName}");
+		}
+	}
+
+	public class Phase
+	{
+		public const string fileListSuffix = ".txt";
+		public const string rebuildedFileListSuffix = ".filelist.txt";
+
+		public readonly string phaseName;
+		public readonly bool isTerminal;
+		public readonly bool isSingleThreaded;
+
+		public string? currentExecutablePath;
+		public Config? config;
+		public string? phaseParameter;
+
+		public string[]? filterElements;
+
+		public Phase(string phaseName, bool isTerminal, bool isSingleThreaded)
+		{
+			this.phaseName = phaseName;
+			this.isTerminal = isTerminal;
+			this.isSingleThreaded = isSingleThreaded;
+		}
+
+		public void Init(string currentExecutablePath, Config config)
+		{
+			this.currentExecutablePath = currentExecutablePath;
+			this.config = config;
+			phaseParameter = config.GetPhaseSpecificParameters(phaseName);
+		}
+
+		public void ReadFileList()
+		{
+			if (isTerminal)
+				return;
+
+			string filelistPath = currentExecutablePath + phaseName + fileListSuffix;
+			if (File.Exists(filelistPath))
+			{
+				Program.PrintConsoleAndTitle($"Reading file list: \"{filelistPath}\"");
+
+				try
+				{
+					// TODO: Asynchronize
+					filterElements = File.ReadAllLines(filelistPath);
+				}
+				catch (Exception ex)
+				{
+					Console.WriteLine($"Error reading file list: {ex}");
+				}
+			}
+			else
+				Console.WriteLine($"Phase filter file not found for phase: {filelistPath}");
+		}
+
+		private void TrimTrailingPathSeparators(ref string path)
+		{
+			while (path.EndsWith("\\"))
+				path = path[(path.LastIndexOf('\\') + 1)..];
+		}
+
+		private string ExtractTargetName(string path)
+		{
+			TrimTrailingPathSeparators(ref path);
+			return path[(path.LastIndexOf('\\') + 1)..];
+		}
+
+		private string ExtractSuperDirectoryName(string path)
+		{
+			TrimTrailingPathSeparators(ref path);
+			return path[..(path.LastIndexOf('\\') + 1)];
+		}
+
+		public string? RebuildFileList(string path, string? prefix = null)
+		{
+			if (isTerminal || config == null || filterElements == null)
+				return null;
+
+			bool includeRoot = config.IncludeRootDirectory;
+			string targetDirectoryName = ExtractTargetName(path);
+
+			var newFilterElements = new List<string>();
+
+			foreach (var filter in filterElements)
+			{
+				try
+				{
+					if (Directory.EnumerateFiles(path, filter, SearchOption.AllDirectories).Any())
+						newFilterElements.Add((includeRoot ? targetDirectoryName + "\\" : "") + filter);
+				}
+				catch (Exception ex)
+				{
+					Console.WriteLine($"Error re-building file list: {ex}");
 				}
 			}
 
-			// TODO: Check any files to compress with FastLZMA2
+			string? fileListPath = null;
 
-			PerformPhase("FastLZMA2", path, titlePrefix, $"-r {flzma2Exclude} -- \"{archiveName}\" \"{(includeRoot ? currentDirName : "*")}\"");
+			if (newFilterElements.Count > 0)
+			{
+				try
+				{
+					File.WriteAllLines(fileListPath = currentExecutablePath + (prefix ?? "") + phaseName + rebuildedFileListSuffix, newFilterElements);
+				}
+				catch (Exception ex)
+				{
+					Console.WriteLine($"Error writing re-builded file list: {ex}");
+				}
+			}
+			else
+				Console.WriteLine("Rebuild-WARNING: There's no file matching extension");
 
-			Console.WriteLine();
-			Console.WriteLine($"Finished processing {path}");
+			return fileListPath;
 		}
 
-		private void PerformPhase(string phaseName, string path, string titlePrefix, string extraParameters)
+		public Task? PerformPhaseAsync(string path, string extraParameters)
 		{
-			Console.Title = $"{titlePrefix}Compressing \"{path}\" - {phaseName} phase";
+			if (config == null)
+				return null;
 
-			Console.WriteLine("==================================");
-			Console.WriteLine($"{phaseName} phase - Phase started.");
+			string currentTargetName = ExtractTargetName(path);
+
+			Console.WriteLine($">> ===== ----- {phaseName} Phase (Async) ----- ===== <<");
+			Program.PrintConsoleAndTitle($"Queued \"{currentTargetName}\" - {phaseName} Phase");
 			Console.WriteLine();
 
-			int errcode = -1;
+			Task? task = null;
 
 			try
 			{
-				Process sevenzip = new Process();
-				sevenzip.StartInfo.FileName = config.Read("7z");
-				string cd = includeRoot ? currentDirectory : path;
-				sevenzip.StartInfo.WorkingDirectory = cd + "\\";
-				sevenzip.StartInfo.Arguments = $"{config.Read("BaseArgs")} {config.Read($"Args_{phaseName}")} {extraParameters}";
-				sevenzip.StartInfo.UseShellExecute = false;
+				Process sevenzip = new();
+				sevenzip.StartInfo.FileName = config.SevenZipExecutable;
+				sevenzip.StartInfo.WorkingDirectory = $"{(config.IncludeRootDirectory ? ExtractSuperDirectoryName(path) : path)}\\";
+				sevenzip.StartInfo.Arguments = $"{config.CommonArguments} {phaseParameter} {extraParameters}";
+				sevenzip.StartInfo.UseShellExecute = true;
 
 				Console.WriteLine("Params: " + sevenzip.StartInfo.Arguments);
 
 				sevenzip.Start();
 
-
-				sevenzip.WaitForExit();
-
-				errcode = sevenzip.ExitCode;
+				task = sevenzip.WaitForExitAsync();
 			}
 			catch (Exception ex)
 			{
-				Console.WriteLine("Exception while executing 7z: " + ex.ToString());
+				Console.WriteLine("Exception while executing 7z asynchronously: " + ex.ToString());
 			}
 
-			if (errcode != 0)
+			return task;
+		}
+
+		public bool PerformPhase(string path, string indexPrefix, string extraParameters)
+		{
+			if (config == null)
+				return false;
+
+			string currentTargetName = ExtractTargetName(path);
+
+			Console.WriteLine($">> ===== -----<< {phaseName} Phase >>----- ===== <<");
+			Program.PrintConsoleAndTitle($"{indexPrefix} Started {indexPrefix} \"{currentTargetName}\" - {phaseName} Phase");
+			Console.WriteLine();
+
+			int errorCode = -1;
+
+			//BinaryWriter? bw = null;
+			try
 			{
-				Console.Title = $"{titlePrefix}Error compressing \"{path}\" - {phaseName} phase";
+				//bw = new BinaryWriter(new FileStream($"{currentExecutablePath}\\{phaseName}.log", FileMode.Append, FileAccess.Write));
+
+				Process sevenzip = new();
+				sevenzip.StartInfo.FileName = config.SevenZipExecutable;
+				sevenzip.StartInfo.WorkingDirectory = $"{(config.IncludeRootDirectory ? ExtractSuperDirectoryName(path) : path)}\\";
+				sevenzip.StartInfo.Arguments = $"{config.CommonArguments} {phaseParameter} {extraParameters}";
+				sevenzip.StartInfo.UseShellExecute = false;
+				//sevenzip.StartInfo.RedirectStandardOutput = true;
+				//sevenzip.StartInfo.RedirectStandardError = true;
+
+				Console.WriteLine($"{indexPrefix} Params: {sevenzip.StartInfo.Arguments}");
+
+				sevenzip.Start();
+
+				//new Thread(() =>
+				//{
+				//	RedirectSevenZipStream(sevenzip.StandardOutput.BaseStream, bw.BaseStream);
+				//}).Start();
+				//new Thread(() =>
+				//{
+				//	RedirectSevenZipStream(sevenzip.StandardError.BaseStream, bw.BaseStream);
+				//}).Start();
+				//new Thread(() =>
+				//{
+				//	RedirectSevenZipStreamToConsole(sevenzip.StandardOutput.BaseStream);
+				//}).Start();
+				//new Thread(() =>
+				//{
+				//	RedirectSevenZipStreamToConsole(sevenzip.StandardError.BaseStream);
+				//}).Start();
+
+				sevenzip.WaitForExit();
+
+				errorCode = sevenzip.ExitCode;
+
+				//bw.Close();
+			}
+			catch (Exception ex)
+			{
+				//bw?.Close();
+				Console.WriteLine($"{indexPrefix} Exception while executing 7z: {ex}");
+			}
+
+			bool error = errorCode != 0;
+
+			if (error)
+			{
+				Console.Title = $"{indexPrefix} Error compressing \"{path}\" - {phaseName} phase";
 
 				Console.BackgroundColor = ConsoleColor.DarkRed;
-				Console.WriteLine($"Compression finished with errors/warnings. (error code {errcode})");
+				Console.WriteLine($"Compression finished with errors/warnings. (error code {errorCode})"); // TODO: 7-zip error code dictionary are available in online.
 				Console.WriteLine("Check the error message and press any key to continue.");
 				Console.ReadKey();
 
 				Console.BackgroundColor = ConsoleColor.Black;
-				error = true;
 			}
 
 			Console.WriteLine();
 			Console.WriteLine();
-			Console.WriteLine($"{phaseName} phase - Phase finished.");
+			Program.PrintConsoleAndTitle($"{indexPrefix} \"{currentTargetName}\" - {phaseName} Phase Finished.");
+
+			return error;
 		}
 
-		private void RebuildFileList(string path, string currentDirName, (string, string, string[]?)[] fileList)
-		{
+		//private static void RedirectSevenZipStream(Stream from, Stream to)
+		//{
+		//	int readed = from.ReadByte();
 
-			foreach (var (_, filename, list) in fileList)
-			{
-				if (list == null) continue;
+		//	while (readed != -1)
+		//	{
+		//		to.WriteByte((byte)readed);
+		//		readed = from.ReadByte();
+		//	}
+		//}
 
-				var newFilterList = new List<string>();
-				foreach (var filter in list)
-				{
-					try
-					{
-						if (Directory.EnumerateFiles(path, filter, SearchOption.AllDirectories).Any())
-							newFilterList.Add((includeRoot ? currentDirName + "\\" : "") + filter);
-					}
-					catch (Exception ex)
-					{
-						Console.WriteLine($"Error rebuilding file list: {ex.ToString()}");
-					}
-				}
+		//private static void RedirectSevenZipStreamToConsole(Stream from)
+		//{
+		//	int readed = from.ReadByte();
 
-				if (newFilterList.Count > 0)
-				{
-					try
-					{
-						File.WriteAllLines(currentDirectory + filename, newFilterList);
-					}
-					catch (Exception ex)
-					{
-						Console.WriteLine($"Error writing rebuilded file list: {ex.ToString()}");
-					}
-				}
-			}
-		}
+		//	while (readed != -1)
+		//	{
+		//		Console.Write((char)readed);
+		//		readed = from.ReadByte();
+		//	}
+		//}
 	}
 }

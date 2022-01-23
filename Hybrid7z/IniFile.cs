@@ -5,7 +5,7 @@ using System.Text;
 // https://stackoverflow.com/questions/217902/reading-writing-an-ini-file
 namespace Hybrid7z
 {
-	class IniFile   // revision 11
+	public class IniFile   // revision 11
 	{
 		readonly string Path;
 		readonly string EXE = Assembly.GetExecutingAssembly().GetName().Name ?? "Program";
