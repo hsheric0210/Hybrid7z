@@ -175,7 +175,7 @@ namespace Hybrid7z
 			{
 				if (File.Exists(currentDirectory + fileName))
 				{
-					flzma2Exclude += $"-xr@\"{currentDirectory}{fileName}\"";
+					flzma2Exclude += $"-xr@\"{currentDirectory}{fileName}\" ";
 					PerformPhase(phaseName, path, titlePrefix, $"-ir@\"{currentDirectory}{fileName}\" -- \"{archiveName}\"");
 				}
 			}
