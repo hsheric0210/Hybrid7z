@@ -2,7 +2,7 @@
 
 namespace Hybrid7z
 {
-	public class Program
+	public class Hybrid7z
 	{
 		public const string VERSION = "0.1";
 		public const string CONFIG_NAME = "Hybrid7z.ini";
@@ -36,10 +36,10 @@ namespace Hybrid7z
 			}
 
 			// Start the program
-			new Program(currentExecutablePath, args);
+			new Hybrid7z(currentExecutablePath, args);
 		}
 
-		public Program(string currentExecutablePath, string[] param)
+		public Hybrid7z(string currentExecutablePath, string[] param)
 		{
 			this.CurrentExecutablePath = currentExecutablePath;
 
@@ -312,8 +312,8 @@ namespace Hybrid7z
 
 	public class Phase
 	{
-		public const string fileListSuffix = ".txt";
-		public const string rebuildedFileListSuffix = ".filelist.txt";
+		public const string FILELIST_SUFFIX = ".txt";
+		public const string REBUILDED_FILELIST_SUFFIX = ".lst";
 
 		public readonly string phaseName;
 		public readonly bool isTerminal;
@@ -344,10 +344,10 @@ namespace Hybrid7z
 			if (isTerminal)
 				return null;
 
-			string filelistPath = currentExecutablePath + phaseName + fileListSuffix;
+			string filelistPath = currentExecutablePath + phaseName + FILELIST_SUFFIX;
 			if (File.Exists(filelistPath))
 			{
-				Program.PrintConsoleAndTitle($"[RFL] Reading file list: \"{filelistPath}\"");
+				Hybrid7z.PrintConsoleAndTitle($"[RFL] Reading file list: \"{filelistPath}\"");
 
 				try
 				{
@@ -383,7 +383,7 @@ namespace Hybrid7z
 				return Task.FromResult((string?)null);
 
 			bool includeRoot = config.IncludeRootDirectory;
-			string targetDirectoryName = Program.ExtractTargetName(path);
+			string targetDirectoryName = Hybrid7z.ExtractTargetName(path);
 
 			return Task.Run(() =>
 			{
@@ -414,7 +414,7 @@ namespace Hybrid7z
 				{
 					try
 					{
-						File.WriteAllLines(fileListPath = currentExecutablePath + fileNamePrefix + phaseName + rebuildedFileListSuffix, newFilterElements);
+						File.WriteAllLines(fileListPath = currentExecutablePath + fileNamePrefix + phaseName + REBUILDED_FILELIST_SUFFIX, newFilterElements);
 					}
 					catch (Exception ex)
 					{
@@ -431,10 +431,10 @@ namespace Hybrid7z
 			if (config == null)
 				return null;
 
-			string currentTargetName = Program.ExtractTargetName(path);
+			string currentTargetName = Hybrid7z.ExtractTargetName(path);
 
 			Console.WriteLine($">> ===== ----- {phaseName} Phase (Parallel) ----- ===== <<");
-			Program.PrintConsoleAndTitle($"[PRL-{phaseName}] Queued \"{currentTargetName}\" - {phaseName} Phase");
+			Hybrid7z.PrintConsoleAndTitle($"[PRL-{phaseName}] Queued \"{currentTargetName}\" - {phaseName} Phase");
 			Console.WriteLine();
 
 			Task? task = null;
@@ -443,7 +443,7 @@ namespace Hybrid7z
 			{
 				Process sevenzip = new();
 				sevenzip.StartInfo.FileName = config.SevenZipExecutable;
-				sevenzip.StartInfo.WorkingDirectory = $"{(config.IncludeRootDirectory ? Program.ExtractSuperDirectoryName(path) : path)}\\";
+				sevenzip.StartInfo.WorkingDirectory = $"{(config.IncludeRootDirectory ? Hybrid7z.ExtractSuperDirectoryName(path) : path)}\\";
 				sevenzip.StartInfo.Arguments = $"{config.CommonArguments} {phaseParameter} {extraParameters}";
 				sevenzip.StartInfo.UseShellExecute = true;
 
@@ -471,10 +471,10 @@ namespace Hybrid7z
 			if (config == null)
 				return false;
 
-			string currentTargetName = Program.ExtractTargetName(path);
+			string currentTargetName = Hybrid7z.ExtractTargetName(path);
 
 			Console.WriteLine($">> ===== -----<< {phaseName} Phase (Sequential) >>----- ===== <<");
-			Program.PrintConsoleAndTitle($"{indexPrefix} [SQN] Started {indexPrefix} \"{currentTargetName}\" - {phaseName} Phase");
+			Hybrid7z.PrintConsoleAndTitle($"{indexPrefix} [SQN] Started {indexPrefix} \"{currentTargetName}\" - {phaseName} Phase");
 			Console.WriteLine();
 
 			int errorCode = -1;
@@ -483,7 +483,7 @@ namespace Hybrid7z
 			{
 				Process sevenzip = new();
 				sevenzip.StartInfo.FileName = config.SevenZipExecutable;
-				sevenzip.StartInfo.WorkingDirectory = $"{(config.IncludeRootDirectory ? Program.ExtractSuperDirectoryName(path) : path)}\\";
+				sevenzip.StartInfo.WorkingDirectory = $"{(config.IncludeRootDirectory ? Hybrid7z.ExtractSuperDirectoryName(path) : path)}\\";
 				sevenzip.StartInfo.Arguments = $"{config.CommonArguments} {phaseParameter} {extraParameters}";
 				sevenzip.StartInfo.UseShellExecute = false;
 
@@ -514,7 +514,7 @@ namespace Hybrid7z
 
 			Console.WriteLine();
 			Console.WriteLine();
-			Program.PrintConsoleAndTitle($"{indexPrefix} [SQN] \"{currentTargetName}\" - {phaseName} Phase Finished.");
+			Hybrid7z.PrintConsoleAndTitle($"{indexPrefix} [SQN] \"{currentTargetName}\" - {phaseName} Phase Finished.");
 
 			return error;
 		}
