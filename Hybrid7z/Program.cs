@@ -5,6 +5,7 @@ namespace Hybrid7z
 	public class Program
 	{
 		public const string VERSION = "0.1";
+		public const string CONFIG_NAME = "Hybrid7z.ini";
 
 		private static readonly Dictionary<string, string> TargetNameCache = new();
 		private static readonly Dictionary<string, string> SuperNameCache = new();
@@ -14,19 +15,23 @@ namespace Hybrid7z
 
 		private readonly Config LocalConfig;
 
+		// KEY: Target Directory Name (Not Path)
+		// VALUE:
+		// *** KEY: Phase name
+		// *** VALUE: Path of re-builded file list
 		public Dictionary<string, Dictionary<string, string>> RebuildedFileListMap = new();
 		public bool AnyErrorOccurred;
 
 		public static void Main(string[] args)
 		{
-			Console.WriteLine($"Hybrid7z v{VERSION} - A hybrid 7-zip compressor");
+			Console.WriteLine($"Hybrid7z v{VERSION}");
 
 			string currentExecutablePath = AppDomain.CurrentDomain.BaseDirectory;
 
 			// Check configuration file is exists
-			if (!File.Exists(currentExecutablePath + "Hybrid7z.ini"))
+			if (!File.Exists(currentExecutablePath + CONFIG_NAME))
 			{
-				Console.WriteLine("Writing default config");
+				Console.WriteLine("[CFG] Writing default config");
 				SaveDefaultConfig(currentExecutablePath);
 			}
 
@@ -38,7 +43,8 @@ namespace Hybrid7z
 		{
 			this.CurrentExecutablePath = currentExecutablePath;
 
-			LocalConfig = new Config(new IniFile($"{currentExecutablePath}Hybrid7z.ini"));
+			PrintConsoleAndTitle($"[CFG] Loading config... ({CONFIG_NAME})");
+			LocalConfig = new Config(new IniFile($"{currentExecutablePath}{CONFIG_NAME}"));
 
 			Phases = new Phase[5];
 			Phases[0] = new Phase("PPMd", false, true);
@@ -135,7 +141,12 @@ namespace Hybrid7z
 				Console.BackgroundColor = ConsoleColor.DarkBlue;
 			}
 			Console.WriteLine("[DFL] Press any key to delete leftover filelists and exit program...");
-			Console.ReadKey();
+
+			ConsoleKeyInfo ci;
+			do
+			{
+				ci = Console.ReadKey();
+			} while (ci.Modifiers != 0);
 
 			// Delete any left-over filelist files
 			foreach (var files in RebuildedFileListMap.Values)
@@ -149,7 +160,7 @@ namespace Hybrid7z
 
 		private static void SaveDefaultConfig(string currentDir)
 		{
-			var ini = new IniFile($"{currentDir}Hybrid7z.ini");
+			var ini = new IniFile($"{currentDir}{CONFIG_NAME}");
 			ini.Write("7z", "7z.exe");
 			ini.Write("BaseArgs", "a -t7z -mhe -ms=1g -mqs -slp -bt -bb3 -sae");
 			ini.Write("Args_PPMd", "-m0=PPMd -mx=9 -myx=9 -mmem=1024m -mo=32 -mmt=1");
@@ -340,12 +351,18 @@ namespace Hybrid7z
 
 				try
 				{
-					File.ReadAllLinesAsync(filelistPath).ContinueWith(task =>
+					return File.ReadAllLinesAsync(filelistPath).ContinueWith(task =>
 					{
 						var strings = new List<string>();
 						foreach (string line in task.Result)
-							if (!String.IsNullOrWhiteSpace(line))
-								strings.Add(line.Trim());
+						{
+							string commentRemoved = line.Contains("//") ? line[..line.IndexOf("//")] : line;
+							if (!string.IsNullOrWhiteSpace(commentRemoved))
+							{
+								Console.WriteLine($"[RFL] Readed from {filelistPath}: \"{commentRemoved}\"");
+								strings.Add(commentRemoved.Trim());
+							}
+						}
 						filterElements = strings.ToArray();
 					});
 				}
@@ -378,7 +395,10 @@ namespace Hybrid7z
 						try
 						{
 							if (Directory.EnumerateFiles(path, filter, SearchOption.AllDirectories).Any())
+							{
+								Console.WriteLine($"[RbFL] Found files for filter \"{filter}\"");
 								newFilterElements.Add((includeRoot ? targetDirectoryName + "\\" : "") + filter);
+							}
 						}
 						catch (Exception ex)
 						{
@@ -431,7 +451,12 @@ namespace Hybrid7z
 
 				sevenzip.Start();
 
-				task = sevenzip.WaitForExitAsync();
+				task = sevenzip.WaitForExitAsync().ContinueWith((task) =>
+				{
+					int errorCode = sevenzip.ExitCode;
+					if (errorCode != 0)
+						Console.WriteLine($"[PRL-{phaseName}] Compression finished with errors/warnings. Error code {errorCode} ({Get7ZipExitCodeInformation(errorCode)})");
+				});
 			}
 			catch (Exception ex)
 			{
@@ -480,7 +505,7 @@ namespace Hybrid7z
 				Console.Title = $"{indexPrefix} [SQN] Error compressing \"{path}\" - {phaseName} phase";
 
 				Console.BackgroundColor = ConsoleColor.DarkRed;
-				Console.WriteLine($"[SQN] Compression finished with errors/warnings. (error code {errorCode})"); // TODO: 7-zip error code dictionary are available in online.
+				Console.WriteLine($"[SQN] Compression finished with errors/warnings. Error code {errorCode} ({Get7ZipExitCodeInformation(errorCode)})");
 				Console.WriteLine("[SQN] Check the error message and press any key to continue.");
 				Console.ReadKey();
 
@@ -492,6 +517,19 @@ namespace Hybrid7z
 			Program.PrintConsoleAndTitle($"{indexPrefix} [SQN] \"{currentTargetName}\" - {phaseName} Phase Finished.");
 
 			return error;
+		}
+
+		private static string Get7ZipExitCodeInformation(int exitCode)
+		{
+			return exitCode switch
+			{
+				1 => "Non-fatal warning(s)",
+				2 => "Fatal error",
+				7 => "Command-line error",
+				8 => "Not enough memory for operation",
+				255 => "User stopped the process",
+				_ => "",
+			};
 		}
 	}
 }
