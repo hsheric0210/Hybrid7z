@@ -6,13 +6,16 @@ namespace Hybrid7z
 	{
 		public const string VERSION = "0.1";
 
-		public readonly Phase[] phases;
-		public readonly string currentExecutablePath;
-		private readonly Config config;
+		private static readonly Dictionary<string, string> TargetNameCache = new();
+		private static readonly Dictionary<string, string> SuperNameCache = new();
 
-		public Dictionary<string, Dictionary<string, string>> rebuildedFileListMap = new();
+		public readonly Phase[] Phases;
+		public readonly string CurrentExecutablePath;
 
-		public bool anyErrors;
+		private readonly Config LocalConfig;
+
+		public Dictionary<string, Dictionary<string, string>> RebuildedFileListMap = new();
+		public bool AnyErrorOccurred;
 
 		public static void Main(string[] args)
 		{
@@ -33,23 +36,36 @@ namespace Hybrid7z
 
 		public Program(string currentExecutablePath, string[] param)
 		{
-			this.currentExecutablePath = currentExecutablePath;
+			this.CurrentExecutablePath = currentExecutablePath;
 
-			config = new Config(new IniFile($"{currentExecutablePath}Hybrid7z.ini"));
+			LocalConfig = new Config(new IniFile($"{currentExecutablePath}Hybrid7z.ini"));
 
-			phases = new Phase[5];
-			phases[0] = new Phase("PPMd", false, true);
-			phases[1] = new Phase("Copy", false, true);
-			phases[2] = new Phase("LZMA2", false, false);
-			phases[3] = new Phase("x86", false, false);
-			phases[4] = new Phase("FastLZMA2", true, false);
+			Phases = new Phase[5];
+			Phases[0] = new Phase("PPMd", false, true);
+			Phases[1] = new Phase("Copy", false, true);
+			Phases[2] = new Phase("LZMA2", false, false);
+			Phases[3] = new Phase("x86", false, false);
+			Phases[4] = new Phase("FastLZMA2", true, false);
 
-			foreach (var phase in phases)
+			var taskList = new List<Task>();
+
+			PrintConsoleAndTitle("[P] Initializing phases...");
+			int tick = Environment.TickCount;
+
+			foreach (var phase in Phases)
 			{
-				PrintConsoleAndTitle($"Initializing phase: {phase.phaseName}");
-				phase.Init(currentExecutablePath, config);
-				phase.ReadFileList();
+				PrintConsoleAndTitle($"[P] Initializing phase: {phase.phaseName}");
+				phase.Init(currentExecutablePath, LocalConfig);
+
+				var task = phase.ReadFileList();
+				if (task != null)
+					taskList.Add(task);
 			}
+
+			Task.WhenAll(taskList).Wait();
+			Console.WriteLine($"[P] Done initializing phases. (Took {Environment.TickCount - tick}ms)");
+
+			taskList.Clear();
 
 			int totalFileCount = param.Length;
 			var targets = new List<string>();
@@ -58,15 +74,14 @@ namespace Hybrid7z
 				if (Directory.Exists(targetPath))
 					targets.Add(targetPath);
 				else if (File.Exists(targetPath))
-					Console.WriteLine($"WARNING: Currently, file are not supported (only directories are supported) - \"{targetPath}\"");
+					Console.WriteLine($"[T] WARNING: Currently, file are not supported (only directories are supported) - \"{targetPath}\"");
 				else
-					Console.WriteLine($"WARNING: File not exists - \"{targetPath}\"");
+					Console.WriteLine($"[T] WARNING: File not exists - \"{targetPath}\"");
 
-			PrintConsoleAndTitle("Re-building file lists...");
-			int tick = Environment.TickCount;
+			PrintConsoleAndTitle("[RbFL] Re-building file lists...");
+			tick = Environment.TickCount;
 
-			var taskList = new List<Task>();
-			foreach (var phase in phases)
+			foreach (var phase in Phases)
 			{
 				string phaseName = phase.phaseName;
 				foreach (string target in targets)
@@ -74,13 +89,13 @@ namespace Hybrid7z
 					string targetName = ExtractTargetName(target);
 					taskList.Add(phase.RebuildFileList(target, $"{targetName}.").ContinueWith(task =>
 					{
-						if (!rebuildedFileListMap.ContainsKey(targetName))
-							rebuildedFileListMap.Add(targetName, new());
+						if (!RebuildedFileListMap.ContainsKey(targetName))
+							RebuildedFileListMap.Add(targetName, new());
 
-						if (rebuildedFileListMap.TryGetValue(targetName, out Dictionary<string, string>? map) && task.Result != null)
+						if (RebuildedFileListMap.TryGetValue(targetName, out Dictionary<string, string>? map) && task.Result != null)
 						{
 							string path = task.Result;
-							Console.WriteLine($"(Re-builded) File list for [file=\"{targetName}\", phase={phaseName}] -> {path}");
+							Console.WriteLine($"[RbFL] (Re-builded) File list for [file=\"{targetName}\", phase={phaseName}] -> {path}");
 							map.Add(phaseName, path);
 						}
 					}));
@@ -89,44 +104,46 @@ namespace Hybrid7z
 
 			Task.WhenAll(taskList).Wait();
 
-			Console.WriteLine($"Done rebuilding file lists (Took {Environment.TickCount - tick}ms)");
+			Console.WriteLine($"[RbFL] Done rebuilding file lists (Took {Environment.TickCount - tick}ms)");
+			Console.WriteLine("[C] Now starting the compression...");
 
-			var multithreadedPhases = new List<Phase>();
-			foreach (var phase in phases)
-				if (phase.isSingleThreaded)
-					anyErrors = RunSinglethreadedPhase(phase, targets) || anyErrors;
+			var sequentialPhases = new List<Phase>();
+			foreach (var phase in Phases)
+				if (phase.doesntSupportMultiThread)
+					AnyErrorOccurred = RunParallelPhase(phase, targets) || AnyErrorOccurred;
 				else
-					multithreadedPhases.Add(phase);
+					sequentialPhases.Add(phase);
 
+			// Phases with multi-thread support MUST run sequentially, Or they will crash because of insufficient RAM or other system resources.
 			int currentFileIndex = 1;
 			foreach (var target in targets)
 			{
 				string titlePrefix = $"[{currentFileIndex}/{totalFileCount}]";
-				anyErrors = RunMultithreadedPhase(multithreadedPhases, target, titlePrefix) || anyErrors;
+				AnyErrorOccurred = RunSequentialPhase(sequentialPhases, target, titlePrefix) || AnyErrorOccurred;
 				currentFileIndex++;
 			}
 
 			// Print process result
-			if (anyErrors)
+			if (AnyErrorOccurred)
 			{
-				Console.WriteLine("One or more file(s) failed to process");
+				Console.WriteLine("[C] One or more file(s) failed to compress");
 				Console.BackgroundColor = ConsoleColor.DarkRed;
 			}
 			else
 			{
-				Console.WriteLine("All files are successfully proceed without any error(s).");
+				Console.WriteLine("[C] All files are successfully proceed without any error(s).");
 				Console.BackgroundColor = ConsoleColor.DarkBlue;
 			}
-			Console.WriteLine("Press any key to exit program...");
+			Console.WriteLine("[DFL] Press any key to delete leftover filelists and exit program...");
 			Console.ReadKey();
 
 			// Delete any left-over filelist files
-			foreach (var files in rebuildedFileListMap.Values)
+			foreach (var files in RebuildedFileListMap.Values)
 				foreach (var file in files.Values)
 					if (file != null && File.Exists(file))
 					{
 						File.Delete(file);
-						Console.WriteLine($"Deleted {file}");
+						Console.WriteLine($"[DFL] Deleted (re-builded) file list \"{file}\"");
 					}
 		}
 
@@ -149,9 +166,41 @@ namespace Hybrid7z
 			Console.Title = message;
 		}
 
-		private bool RunSinglethreadedPhase(Phase phase, IEnumerable<string> paths)
+		public static void TrimTrailingPathSeparators(ref string path)
 		{
-			bool includeRoot = config.IncludeRootDirectory;
+			while (path.EndsWith("\\"))
+				path = path[(path.LastIndexOf('\\') + 1)..];
+		}
+
+		public static string ExtractTargetName(string path)
+		{
+			if (TargetNameCache.TryGetValue(path, out var targetName))
+				return targetName;
+
+			TrimTrailingPathSeparators(ref path);
+
+			targetName = path[(path.LastIndexOf('\\') + 1)..];
+			TargetNameCache.Add(path, targetName);
+			return targetName;
+		}
+
+		public static string ExtractSuperDirectoryName(string path)
+		{
+			if (SuperNameCache.TryGetValue(path, out var superName))
+				return superName;
+
+			TrimTrailingPathSeparators(ref path);
+
+			superName = path[..(path.LastIndexOf('\\') + 1)];
+			SuperNameCache.Add(path, superName);
+			return superName;
+		}
+
+		private bool RunParallelPhase(Phase phase, IEnumerable<string> paths)
+		{
+			string phaseName = phase.phaseName;
+
+			bool includeRoot = LocalConfig.IncludeRootDirectory;
 			bool thereIsNullTask = false;
 			var taskList = new List<Task>();
 
@@ -162,12 +211,12 @@ namespace Hybrid7z
 
 				Console.WriteLine("<<==================== <*> ====================>>");
 
-				if (rebuildedFileListMap.TryGetValue(currentTargetName, out Dictionary<string, string>? fileListMap) && fileListMap.TryGetValue(phase.phaseName, out string? fileListPath) && fileListPath != null)
+				if (RebuildedFileListMap.TryGetValue(currentTargetName, out Dictionary<string, string>? fileListMap) && fileListMap.TryGetValue(phaseName, out string? fileListPath) && fileListPath != null)
 				{
-					PrintConsoleAndTitle($"Start processing \"{path}\"");
+					PrintConsoleAndTitle($"[PRL-{phaseName}] Start processing \"{path}\"");
 					Console.WriteLine();
 
-					var task = phase.PerformPhaseAsync(path, $"-ir@\"{fileListPath}\" -- \"{archiveFileName}\"");
+					var task = phase.PerformPhaseParallel(path, $"-ir@\"{fileListPath}\" -- \"{archiveFileName}\"");
 
 					if (task != null)
 						taskList.Add(task);
@@ -175,26 +224,26 @@ namespace Hybrid7z
 						thereIsNullTask = true;
 
 					Console.WriteLine();
-					PrintConsoleAndTitle($"Finished processing {path}");
+					PrintConsoleAndTitle($"[PRL-{phaseName}] Finished processing {path}");
 				}
 
 				Console.WriteLine("<<==================== <~> <$> ====================>>");
 			}
 
-			PrintConsoleAndTitle("Waiting for all asynchronous compression processes are finished...");
+			PrintConsoleAndTitle($"[PRL-{phaseName}] Waiting for all parallel compression processes are finished...");
 
 			int tick = Environment.TickCount;
 			Task allTask = Task.WhenAll(taskList);
 			allTask.Wait();
 
-			Console.WriteLine($"All asynchronous compression processes are finished! (Took {Environment.TickCount - tick}ms)");
+			Console.WriteLine($"[PRL-{phaseName}] All parallel compression processes are finished! (Took {Environment.TickCount - tick}ms)");
 
 			return thereIsNullTask || allTask.IsFaulted;
 		}
 
-		private bool RunMultithreadedPhase(IEnumerable<Phase> phases, string path, string titlePrefix)
+		private bool RunSequentialPhase(IEnumerable<Phase> phases, string path, string titlePrefix)
 		{
-			bool includeRoot = config.IncludeRootDirectory;
+			bool includeRoot = LocalConfig.IncludeRootDirectory;
 			string currentTargetName = path[(path.LastIndexOf('\\') + 1)..];
 			string archiveFileName = $"{(includeRoot ? "" : "..\\")}{currentTargetName}.7z";
 
@@ -202,7 +251,7 @@ namespace Hybrid7z
 
 			Console.WriteLine("<<=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= <*> =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=>>");
 
-			PrintConsoleAndTitle($"{titlePrefix} Start processing \"{path}\"");
+			PrintConsoleAndTitle($"{titlePrefix} [SQN] Start processing \"{path}\"");
 			Console.WriteLine();
 
 			foreach (var phase in phases)
@@ -210,40 +259,21 @@ namespace Hybrid7z
 				if (phase.isTerminal)
 				{
 					var list = "";
-					if (rebuildedFileListMap.TryGetValue(currentTargetName, out Dictionary<string, string>? map))
+					if (RebuildedFileListMap.TryGetValue(currentTargetName, out Dictionary<string, string>? map))
 						list = string.Join(" ", map.Values.ToList().ConvertAll((from) => $"-xr@\"{from}\""));
-					errorOccurred = phase.PerformPhase(path, titlePrefix, $"-r {list} -- \"{archiveFileName}\" \"{(includeRoot ? currentTargetName : "*")}\"") || errorOccurred;
+					errorOccurred = phase.PerformPhaseSequential(path, titlePrefix, $"-r {list} -- \"{archiveFileName}\" \"{(includeRoot ? currentTargetName : "*")}\"") || errorOccurred;
 				}
-				else if (rebuildedFileListMap.TryGetValue(currentTargetName, out Dictionary<string, string>? map) && map.TryGetValue(phase.phaseName, out string? fileListPath) && fileListPath != null)
-					errorOccurred = phase.PerformPhase(path, titlePrefix, $"-ir@\"{fileListPath}\" -- \"{archiveFileName}\"") || errorOccurred;
+				else if (RebuildedFileListMap.TryGetValue(currentTargetName, out Dictionary<string, string>? map) && map.TryGetValue(phase.phaseName, out string? fileListPath) && fileListPath != null)
+					errorOccurred = phase.PerformPhaseSequential(path, titlePrefix, $"-ir@\"{fileListPath}\" -- \"{archiveFileName}\"") || errorOccurred;
 			}
 
 			Console.WriteLine();
-			PrintConsoleAndTitle($"{titlePrefix} Finished processing {path}");
+			PrintConsoleAndTitle($"{titlePrefix} [SQN] Finished processing {path}");
 
 			Console.WriteLine("<<=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= <$> <~> =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=>>");
 
 			return errorOccurred;
 		}
-
-		public static void TrimTrailingPathSeparators(ref string path)
-		{
-			while (path.EndsWith("\\"))
-				path = path[(path.LastIndexOf('\\') + 1)..];
-		}
-
-		public static string ExtractTargetName(string path)
-		{
-			TrimTrailingPathSeparators(ref path);
-			return path[(path.LastIndexOf('\\') + 1)..];
-		}
-
-		public static string ExtractSuperDirectoryName(string path)
-		{
-			TrimTrailingPathSeparators(ref path);
-			return path[..(path.LastIndexOf('\\') + 1)];
-		}
-
 	}
 
 	public class Config
@@ -276,7 +306,7 @@ namespace Hybrid7z
 
 		public readonly string phaseName;
 		public readonly bool isTerminal;
-		public readonly bool isSingleThreaded;
+		public readonly bool doesntSupportMultiThread;
 
 		public string? currentExecutablePath;
 		public Config? config;
@@ -284,11 +314,11 @@ namespace Hybrid7z
 
 		public string[]? filterElements;
 
-		public Phase(string phaseName, bool isTerminal, bool isSingleThreaded)
+		public Phase(string phaseName, bool isTerminal, bool doesntSupportMultiThread)
 		{
 			this.phaseName = phaseName;
 			this.isTerminal = isTerminal;
-			this.isSingleThreaded = isSingleThreaded;
+			this.doesntSupportMultiThread = doesntSupportMultiThread;
 		}
 
 		public void Init(string currentExecutablePath, Config config)
@@ -298,28 +328,36 @@ namespace Hybrid7z
 			phaseParameter = config.GetPhaseSpecificParameters(phaseName);
 		}
 
-		public void ReadFileList()
+		public Task? ReadFileList()
 		{
 			if (isTerminal)
-				return;
+				return null;
 
 			string filelistPath = currentExecutablePath + phaseName + fileListSuffix;
 			if (File.Exists(filelistPath))
 			{
-				Program.PrintConsoleAndTitle($"Reading file list: \"{filelistPath}\"");
+				Program.PrintConsoleAndTitle($"[RFL] Reading file list: \"{filelistPath}\"");
 
 				try
 				{
-					// TODO: Asynchronize
-					filterElements = File.ReadAllLines(filelistPath);
+					File.ReadAllLinesAsync(filelistPath).ContinueWith(task =>
+					{
+						var strings = new List<string>();
+						foreach (string line in task.Result)
+							if (!String.IsNullOrWhiteSpace(line))
+								strings.Add(line.Trim());
+						filterElements = strings.ToArray();
+					});
 				}
 				catch (Exception ex)
 				{
-					Console.WriteLine($"Error reading file list: {ex}");
+					Console.WriteLine($"[RFL] Error reading file list: {ex}");
 				}
 			}
 			else
-				Console.WriteLine($"Phase filter file not found for phase: {filelistPath}");
+				Console.WriteLine($"[RFL] Phase filter file not found for phase: {filelistPath}");
+
+			return null;
 		}
 
 		public Task<string?> RebuildFileList(string path, string fileNamePrefix)
@@ -344,7 +382,7 @@ namespace Hybrid7z
 						}
 						catch (Exception ex)
 						{
-							Console.WriteLine($"Error re-building file list: {ex}");
+							Console.WriteLine($"[RbFL] Error re-building file list: {ex}");
 						}
 					}));
 
@@ -360,7 +398,7 @@ namespace Hybrid7z
 					}
 					catch (Exception ex)
 					{
-						Console.WriteLine($"Error writing re-builded file list: {ex}");
+						Console.WriteLine($"[RbFL] Error writing re-builded file list: {ex}");
 					}
 				}
 
@@ -368,15 +406,15 @@ namespace Hybrid7z
 			});
 		}
 
-		public Task? PerformPhaseAsync(string path, string extraParameters)
+		public Task? PerformPhaseParallel(string path, string extraParameters)
 		{
 			if (config == null)
 				return null;
 
 			string currentTargetName = Program.ExtractTargetName(path);
 
-			Console.WriteLine($">> ===== ----- {phaseName} Phase (Async) ----- ===== <<");
-			Program.PrintConsoleAndTitle($"Queued \"{currentTargetName}\" - {phaseName} Phase");
+			Console.WriteLine($">> ===== ----- {phaseName} Phase (Parallel) ----- ===== <<");
+			Program.PrintConsoleAndTitle($"[PRL-{phaseName}] Queued \"{currentTargetName}\" - {phaseName} Phase");
 			Console.WriteLine();
 
 			Task? task = null;
@@ -389,7 +427,7 @@ namespace Hybrid7z
 				sevenzip.StartInfo.Arguments = $"{config.CommonArguments} {phaseParameter} {extraParameters}";
 				sevenzip.StartInfo.UseShellExecute = true;
 
-				Console.WriteLine("Params: " + sevenzip.StartInfo.Arguments);
+				Console.WriteLine($"[PRL-{phaseName}] Params: {sevenzip.StartInfo.Arguments}");
 
 				sevenzip.Start();
 
@@ -397,21 +435,21 @@ namespace Hybrid7z
 			}
 			catch (Exception ex)
 			{
-				Console.WriteLine("Exception while executing 7z asynchronously: " + ex.ToString());
+				Console.WriteLine($"[PRL-{phaseName}] Exception while executing 7z in parallel: {ex}");
 			}
 
 			return task;
 		}
 
-		public bool PerformPhase(string path, string indexPrefix, string extraParameters)
+		public bool PerformPhaseSequential(string path, string indexPrefix, string extraParameters)
 		{
 			if (config == null)
 				return false;
 
 			string currentTargetName = Program.ExtractTargetName(path);
 
-			Console.WriteLine($">> ===== -----<< {phaseName} Phase >>----- ===== <<");
-			Program.PrintConsoleAndTitle($"{indexPrefix} Started {indexPrefix} \"{currentTargetName}\" - {phaseName} Phase");
+			Console.WriteLine($">> ===== -----<< {phaseName} Phase (Sequential) >>----- ===== <<");
+			Program.PrintConsoleAndTitle($"{indexPrefix} [SQN] Started {indexPrefix} \"{currentTargetName}\" - {phaseName} Phase");
 			Console.WriteLine();
 
 			int errorCode = -1;
@@ -424,7 +462,7 @@ namespace Hybrid7z
 				sevenzip.StartInfo.Arguments = $"{config.CommonArguments} {phaseParameter} {extraParameters}";
 				sevenzip.StartInfo.UseShellExecute = false;
 
-				Console.WriteLine($"{indexPrefix} Params: {sevenzip.StartInfo.Arguments}");
+				Console.WriteLine($"{indexPrefix} [SQN] Params: {sevenzip.StartInfo.Arguments}");
 
 				sevenzip.Start();
 				sevenzip.WaitForExit();
@@ -432,18 +470,18 @@ namespace Hybrid7z
 			}
 			catch (Exception ex)
 			{
-				Console.WriteLine($"{indexPrefix} Exception while executing 7z: {ex}");
+				Console.WriteLine($"{indexPrefix} [SQN] Exception while executing 7z: {ex}");
 			}
 
 			bool error = errorCode != 0;
 
 			if (error)
 			{
-				Console.Title = $"{indexPrefix} Error compressing \"{path}\" - {phaseName} phase";
+				Console.Title = $"{indexPrefix} [SQN] Error compressing \"{path}\" - {phaseName} phase";
 
 				Console.BackgroundColor = ConsoleColor.DarkRed;
-				Console.WriteLine($"Compression finished with errors/warnings. (error code {errorCode})"); // TODO: 7-zip error code dictionary are available in online.
-				Console.WriteLine("Check the error message and press any key to continue.");
+				Console.WriteLine($"[SQN] Compression finished with errors/warnings. (error code {errorCode})"); // TODO: 7-zip error code dictionary are available in online.
+				Console.WriteLine("[SQN] Check the error message and press any key to continue.");
 				Console.ReadKey();
 
 				Console.BackgroundColor = ConsoleColor.Black;
@@ -451,7 +489,7 @@ namespace Hybrid7z
 
 			Console.WriteLine();
 			Console.WriteLine();
-			Program.PrintConsoleAndTitle($"{indexPrefix} \"{currentTargetName}\" - {phaseName} Phase Finished.");
+			Program.PrintConsoleAndTitle($"{indexPrefix} [SQN] \"{currentTargetName}\" - {phaseName} Phase Finished.");
 
 			return error;
 		}
