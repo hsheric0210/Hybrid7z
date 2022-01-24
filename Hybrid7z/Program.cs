@@ -1,6 +1,4 @@
-﻿using System.Runtime.InteropServices;
-using System.Diagnostics;
-using System.Text;
+﻿using System.Diagnostics;
 
 namespace Hybrid7z
 {
@@ -12,7 +10,7 @@ namespace Hybrid7z
 		public readonly string currentExecutablePath;
 		private readonly Config config;
 
-		public List<string> rebuildedFileLists = new List<string>();
+		public Dictionary<string, Dictionary<string, string>> rebuildedFileListMap = new();
 
 		public bool anyErrors;
 
@@ -57,26 +55,48 @@ namespace Hybrid7z
 			var targets = new List<string>();
 
 			foreach (string targetPath in param)
-			{
-				// string titlePrefix = $"[{currentFileIndex}/{totalFileCount}]";
-
 				if (Directory.Exists(targetPath))
 					targets.Add(targetPath);
-				// anyErrors = ProcessDirectory(filename, titlePrefix) || anyErrors;
 				else if (File.Exists(targetPath))
 					Console.WriteLine($"WARNING: Currently, file are not supported (only directories are supported) - \"{targetPath}\"");
 				else
 					Console.WriteLine($"WARNING: File not exists - \"{targetPath}\"");
+
+			PrintConsoleAndTitle("Re-building file lists...");
+			int tick = Environment.TickCount;
+
+			var taskList = new List<Task>();
+			foreach (var phase in phases)
+			{
+				string phaseName = phase.phaseName;
+				foreach (string target in targets)
+				{
+					string targetName = ExtractTargetName(target);
+					taskList.Add(phase.RebuildFileList(target, $"{targetName}.").ContinueWith(task =>
+					{
+						if (!rebuildedFileListMap.ContainsKey(targetName))
+							rebuildedFileListMap.Add(targetName, new());
+
+						if (rebuildedFileListMap.TryGetValue(targetName, out Dictionary<string, string>? map) && task.Result != null)
+						{
+							string path = task.Result;
+							Console.WriteLine($"(Re-builded) File list for [file=\"{targetName}\", phase={phaseName}] -> {path}");
+							map.Add(phaseName, path);
+						}
+					}));
+				}
 			}
+
+			Task.WhenAll(taskList).Wait();
+
+			Console.WriteLine($"Done rebuilding file lists (Took {Environment.TickCount - tick}ms)");
 
 			var multithreadedPhases = new List<Phase>();
 			foreach (var phase in phases)
-			{
 				if (phase.isSingleThreaded)
 					anyErrors = RunSinglethreadedPhase(phase, targets) || anyErrors;
 				else
 					multithreadedPhases.Add(phase);
-			}
 
 			int currentFileIndex = 1;
 			foreach (var target in targets)
@@ -101,14 +121,13 @@ namespace Hybrid7z
 			Console.ReadKey();
 
 			// Delete any left-over filelist files
-			foreach (string filelist in rebuildedFileLists)
-			{
-				if (File.Exists(filelist))
-				{
-					File.Delete(filelist);
-					Console.WriteLine($"Deleted {filelist}");
-				}
-			}
+			foreach (var files in rebuildedFileListMap.Values)
+				foreach (var file in files.Values)
+					if (file != null && File.Exists(file))
+					{
+						File.Delete(file);
+						Console.WriteLine($"Deleted {file}");
+					}
 		}
 
 		private static void SaveDefaultConfig(string currentDir)
@@ -133,42 +152,17 @@ namespace Hybrid7z
 		private bool RunSinglethreadedPhase(Phase phase, IEnumerable<string> paths)
 		{
 			bool includeRoot = config.IncludeRootDirectory;
-
 			bool thereIsNullTask = false;
 			var taskList = new List<Task>();
-			var map = new Dictionary<string, string?>();
-
-			foreach (var path in paths)
-			{
-				string currentTargetName = ExtractTargetName(path);
-				taskList.Add(phase.RebuildFileList(path, currentTargetName + ".").ContinueWith(task => map.Add(currentTargetName, task.Result)));
-			}
-
-			PrintConsoleAndTitle("Waiting for all asynchronous file-list re-building processes are finished...");
-
-			var tick = Environment.TickCount;
-			var allTask = Task.WhenAll(taskList);
-			allTask.Wait();
-
-			Console.WriteLine($"All asynchronous file-list re-building processes are finished! (Took {Environment.TickCount - tick}ms)");
-
-
-			taskList.Clear();
 
 			foreach (var path in paths)
 			{
 				string currentTargetName = ExtractTargetName(path);
 				string archiveFileName = $"{(includeRoot ? "" : "..\\")}{currentTargetName}.7z";
 
-				// var tupleArray = new (string, string, string[]?)[] { ("PPMd", PPMD_REBUILDED_LIST, ppmdList), ("LZMA2", LZMA2_REBUILDED_LIST, lzma2List), ("Copy", COPY_REBUILDED_LIST, copyList), ("x86", X86_REBUILDED_LIST, x86List) };
-
 				Console.WriteLine("<<==================== <*> ====================>>");
 
-				PrintConsoleAndTitle($"Re-building file list for \"{path}\"");
-
-				//string? fileListPath = phase.RebuildFileList(path, currentTargetName + ".");
-
-				if (map.TryGetValue(currentTargetName, out string? fileListPath) && fileListPath != null)
+				if (rebuildedFileListMap.TryGetValue(currentTargetName, out Dictionary<string, string>? fileListMap) && fileListMap.TryGetValue(phase.phaseName, out string? fileListPath) && fileListPath != null)
 				{
 					PrintConsoleAndTitle($"Start processing \"{path}\"");
 					Console.WriteLine();
@@ -180,8 +174,6 @@ namespace Hybrid7z
 					else
 						thereIsNullTask = true;
 
-					rebuildedFileLists.Add(fileListPath);
-
 					Console.WriteLine();
 					PrintConsoleAndTitle($"Finished processing {path}");
 				}
@@ -191,8 +183,8 @@ namespace Hybrid7z
 
 			PrintConsoleAndTitle("Waiting for all asynchronous compression processes are finished...");
 
-			tick = Environment.TickCount;
-			allTask = Task.WhenAll(taskList);
+			int tick = Environment.TickCount;
+			Task allTask = Task.WhenAll(taskList);
 			allTask.Wait();
 
 			Console.WriteLine($"All asynchronous compression processes are finished! (Took {Environment.TickCount - tick}ms)");
@@ -206,9 +198,7 @@ namespace Hybrid7z
 			string currentTargetName = path[(path.LastIndexOf('\\') + 1)..];
 			string archiveFileName = $"{(includeRoot ? "" : "..\\")}{currentTargetName}.7z";
 
-			bool error = false;
-
-			// var tupleArray = new (string, string, string[]?)[] { ("PPMd", PPMD_REBUILDED_LIST, ppmdList), ("LZMA2", LZMA2_REBUILDED_LIST, lzma2List), ("Copy", COPY_REBUILDED_LIST, copyList), ("x86", X86_REBUILDED_LIST, x86List) };
+			bool errorOccurred = false;
 
 			Console.WriteLine("<<=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= <*> =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=>>");
 
@@ -217,17 +207,15 @@ namespace Hybrid7z
 
 			foreach (var phase in phases)
 			{
-				string? fileListPath = null; // = $"{currentExecutablePath}{phase.phaseName}{Phase.rebuildedFileListSuffix}";
-
 				if (phase.isTerminal)
-					error = phase.PerformPhase(path, titlePrefix, $"-r {string.Join(" ", rebuildedFileLists.ConvertAll((from) => $"-xr@\"{from}\""))} -- \"{archiveFileName}\" \"{(includeRoot ? currentTargetName : "*")}\"") || error;
-				else if ((fileListPath = phase.RebuildFileList(path).Result) != null)
 				{
-					error = phase.PerformPhase(path, titlePrefix, $"-ir@\"{fileListPath}\" -- \"{archiveFileName}\"") || error;
-					rebuildedFileLists.Add(fileListPath);
+					var list = "";
+					if (rebuildedFileListMap.TryGetValue(currentTargetName, out Dictionary<string, string>? map))
+						list = string.Join(" ", map.Values.ToList().ConvertAll((from) => $"-xr@\"{from}\""));
+					errorOccurred = phase.PerformPhase(path, titlePrefix, $"-r {list} -- \"{archiveFileName}\" \"{(includeRoot ? currentTargetName : "*")}\"") || errorOccurred;
 				}
-				else
-					PrintConsoleAndTitle($"(MT) There's no files to apply {phase.phaseName} {path}");
+				else if (rebuildedFileListMap.TryGetValue(currentTargetName, out Dictionary<string, string>? map) && map.TryGetValue(phase.phaseName, out string? fileListPath) && fileListPath != null)
+					errorOccurred = phase.PerformPhase(path, titlePrefix, $"-ir@\"{fileListPath}\" -- \"{archiveFileName}\"") || errorOccurred;
 			}
 
 			Console.WriteLine();
@@ -235,95 +223,8 @@ namespace Hybrid7z
 
 			Console.WriteLine("<<=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= <$> <~> =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=>>");
 
-			return error;
+			return errorOccurred;
 		}
-
-		//private void PerformPhase(string phaseName, string path, string titlePrefix, string extraParameters)
-		//{
-		//	string currentTargetName = path[(path.LastIndexOf('\\') + 1)..];
-
-		//	Console.Title = $"{titlePrefix}Compressing \"{path}\" - {phaseName} phase";
-
-		//	Console.WriteLine("==================================");
-		//	PrintConsoleAndTitle($"{titlePrefix} \"{currentTargetName}\" - {phaseName} Phase");
-		//	Console.WriteLine();
-
-		//	int errcode = -1;
-
-		//	try
-		//	{
-		//		Process sevenzip = new Process();
-		//		sevenzip.StartInfo.FileName = config.Read("7z");
-		//		sevenzip.StartInfo.WorkingDirectory = $"{(includeRoot ? currentExecutablePath : path)}\\";
-		//		sevenzip.StartInfo.Arguments = $"{config.Read("BaseArgs")} {config.Read($"Args_{phaseName}")} {extraParameters}";
-		//		sevenzip.StartInfo.UseShellExecute = false;
-
-		//		Console.WriteLine("Params: " + sevenzip.StartInfo.Arguments);
-
-		//		sevenzip.Start();
-
-		//		sevenzip.WaitForExit();
-
-		//		errcode = sevenzip.ExitCode;
-		//	}
-		//	catch (Exception ex)
-		//	{
-		//		Console.WriteLine("Exception while executing 7z: " + ex.ToString());
-		//	}
-
-		//	if (errcode != 0)
-		//	{
-		//		Console.Title = $"{titlePrefix}Error compressing \"{path}\" - {phaseName} phase";
-
-		//		Console.BackgroundColor = ConsoleColor.DarkRed;
-		//		Console.WriteLine($"Compression finished with errors/warnings. (error code {errcode})");
-		//		Console.WriteLine("Check the error message and press any key to continue.");
-		//		Console.ReadKey();
-
-		//		Console.BackgroundColor = ConsoleColor.Black;
-		//		anyErrors = true;
-		//	}
-
-		//	Console.WriteLine();
-		//	Console.WriteLine();
-		//	PrintConsoleAndTitle($"{titlePrefix} \"{currentTargetName}\" - {phaseName} Phase Finished.");
-		//}
-
-		//private void RebuildFileList(string path, string currentDirName, (string, string, string[]?)[] fileList)
-		//{
-
-		//	foreach (var (_, filename, list) in fileList)
-		//	{
-		//		if (list == null) continue;
-
-		//		var newFilterList = new List<string>();
-		//		foreach (var filter in list)
-		//		{
-		//			try
-		//			{
-		//				if (Directory.EnumerateFiles(path, filter, SearchOption.AllDirectories).Any())
-		//					newFilterList.Add((includeRoot ? currentDirName + "\\" : "") + filter);
-		//			}
-		//			catch (Exception ex)
-		//			{
-		//				Console.WriteLine($"Error rebuilding file list: {ex.ToString()}");
-		//			}
-		//		}
-
-		//		if (newFilterList.Count > 0)
-		//		{
-		//			try
-		//			{
-		//				File.WriteAllLines(currentExecutablePath + filename, newFilterList);
-		//			}
-		//			catch (Exception ex)
-		//			{
-		//				Console.WriteLine($"Error writing rebuilded file list: {ex.ToString()}");
-		//			}
-		//		}
-		//	}
-		//}
-
 
 		public static void TrimTrailingPathSeparators(ref string path)
 		{
@@ -421,7 +322,7 @@ namespace Hybrid7z
 				Console.WriteLine($"Phase filter file not found for phase: {filelistPath}");
 		}
 
-		public Task<string?> RebuildFileList(string path, string? prefix = null)
+		public Task<string?> RebuildFileList(string path, string fileNamePrefix)
 		{
 			if (isTerminal || config == null || filterElements == null)
 				return Task.FromResult((string?)null);
@@ -455,15 +356,13 @@ namespace Hybrid7z
 				{
 					try
 					{
-						File.WriteAllLines(fileListPath = currentExecutablePath + (prefix ?? "") + phaseName + rebuildedFileListSuffix, newFilterElements);
+						File.WriteAllLines(fileListPath = currentExecutablePath + fileNamePrefix + phaseName + rebuildedFileListSuffix, newFilterElements);
 					}
 					catch (Exception ex)
 					{
 						Console.WriteLine($"Error writing re-builded file list: {ex}");
 					}
 				}
-				else
-					Console.WriteLine("Rebuild-WARNING: There's no file matching extension");
 
 				return fileListPath;
 			});
@@ -517,49 +416,22 @@ namespace Hybrid7z
 
 			int errorCode = -1;
 
-			//BinaryWriter? bw = null;
 			try
 			{
-				//bw = new BinaryWriter(new FileStream($"{currentExecutablePath}\\{phaseName}.log", FileMode.Append, FileAccess.Write));
-
 				Process sevenzip = new();
 				sevenzip.StartInfo.FileName = config.SevenZipExecutable;
 				sevenzip.StartInfo.WorkingDirectory = $"{(config.IncludeRootDirectory ? Program.ExtractSuperDirectoryName(path) : path)}\\";
 				sevenzip.StartInfo.Arguments = $"{config.CommonArguments} {phaseParameter} {extraParameters}";
 				sevenzip.StartInfo.UseShellExecute = false;
-				//sevenzip.StartInfo.RedirectStandardOutput = true;
-				//sevenzip.StartInfo.RedirectStandardError = true;
 
 				Console.WriteLine($"{indexPrefix} Params: {sevenzip.StartInfo.Arguments}");
 
 				sevenzip.Start();
-
-				//new Thread(() =>
-				//{
-				//	RedirectSevenZipStream(sevenzip.StandardOutput.BaseStream, bw.BaseStream);
-				//}).Start();
-				//new Thread(() =>
-				//{
-				//	RedirectSevenZipStream(sevenzip.StandardError.BaseStream, bw.BaseStream);
-				//}).Start();
-				//new Thread(() =>
-				//{
-				//	RedirectSevenZipStreamToConsole(sevenzip.StandardOutput.BaseStream);
-				//}).Start();
-				//new Thread(() =>
-				//{
-				//	RedirectSevenZipStreamToConsole(sevenzip.StandardError.BaseStream);
-				//}).Start();
-
 				sevenzip.WaitForExit();
-
 				errorCode = sevenzip.ExitCode;
-
-				//bw.Close();
 			}
 			catch (Exception ex)
 			{
-				//bw?.Close();
 				Console.WriteLine($"{indexPrefix} Exception while executing 7z: {ex}");
 			}
 
@@ -583,27 +455,5 @@ namespace Hybrid7z
 
 			return error;
 		}
-
-		//private static void RedirectSevenZipStream(Stream from, Stream to)
-		//{
-		//	int readed = from.ReadByte();
-
-		//	while (readed != -1)
-		//	{
-		//		to.WriteByte((byte)readed);
-		//		readed = from.ReadByte();
-		//	}
-		//}
-
-		//private static void RedirectSevenZipStreamToConsole(Stream from)
-		//{
-		//	int readed = from.ReadByte();
-
-		//	while (readed != -1)
-		//	{
-		//		Console.Write((char)readed);
-		//		readed = from.ReadByte();
-		//	}
-		//}
 	}
 }
