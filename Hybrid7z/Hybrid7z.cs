@@ -1,4 +1,6 @@
-﻿namespace Hybrid7z
+﻿using System.Collections.Concurrent;
+
+namespace Hybrid7z
 {
 	public class Hybrid7z
 	{
@@ -14,7 +16,7 @@
 		// VALUE:
 		// *** KEY: Phase name
 		// *** VALUE: Path of re-builded file list
-		public Dictionary<string, Dictionary<string, string>> RebuildedFileListMap = new();
+		public ConcurrentDictionary<string, Dictionary<string, string>> RebuildedFileListMap = new();
 
 		public static void Main(string[] args)
 		{
@@ -30,7 +32,14 @@
 			}
 
 			// Start the program
-			new Hybrid7z(currentExecutablePath, args);
+			try
+			{
+				_ = new Hybrid7z(currentExecutablePath, args);
+			}
+			catch (Exception ex)
+			{
+				Utils.PrintError("ERR", $"Unhandled exception caught! Please report it to the author: {ex}");
+			}
 		}
 
 		private void InitializePhases(List<Task> taskList)
@@ -72,7 +81,7 @@
 					taskList.Add(phase.RebuildFileList(target, $"{targetName}.").ContinueWith(task =>
 					{
 						if (!RebuildedFileListMap.ContainsKey(targetName))
-							RebuildedFileListMap.Add(targetName, new());
+							RebuildedFileListMap.TryAdd(targetName, new());
 
 						if (RebuildedFileListMap.TryGetValue(targetName, out Dictionary<string, string>? map) && task.Result != null)
 						{
@@ -96,7 +105,7 @@
 				else
 					sequentialPhases.Add(phase);
 
-			// Phases with multi-thread support MUST run sequentially, Or they will crash because of insufficient RAM or other system resources.
+			// Phases with multi-thread support MUST run sequentially, Or they will crash because of insufficient RAM or other system resources. (Especially, LZMA2, Fast-LZMA2 phase)
 			int totalTargetCount = targets.Count();
 			int currentFileIndex = 1;
 			foreach (string? target in targets)
@@ -109,20 +118,41 @@
 			return error;
 		}
 
+#pragma warning disable CS8618
 		public Hybrid7z(string currentExecutablePath, string[] parameters)
+#pragma warning restore CS8618
 		{
 			CurrentExecutablePath = currentExecutablePath;
 
 			Utils.PrintConsoleAndTitle($"[CFG] Loading config... ({CONFIG_NAME})");
-			LocalConfig = new Config(new IniFile($"{currentExecutablePath}{CONFIG_NAME}"));
 
-			// Construct phases
-			Phases = new Phase[5];
-			Phases[0] = new Phase("PPMd", false, true);
-			Phases[1] = new Phase("Copy", false, true);
-			Phases[2] = new Phase("LZMA2", false, false);
-			Phases[3] = new Phase("x86", false, false);
-			Phases[4] = new Phase("FastLZMA2", true, false);
+			try
+			{
+				// Load config
+				LocalConfig = new Config(new IniFile($"{currentExecutablePath}{CONFIG_NAME}"));
+			}
+			catch (Exception ex)
+			{
+				Utils.PrintError("CFG", $"Can't load config due exception: {ex}");
+				return;
+			}
+
+			Utils.PrintConsoleAndTitle("[P] Constructing phases...");
+			try
+			{
+				// Construct phases
+				Phases = new Phase[5];
+				Phases[0] = new Phase("PPMd", false, true);
+				Phases[1] = new Phase("Copy", false, true);
+				Phases[2] = new Phase("LZMA2", false, false);
+				Phases[3] = new Phase("x86", false, false);
+				Phases[4] = new Phase("FastLZMA2", true, false);
+			}
+			catch (Exception ex)
+			{
+				Utils.PrintError("P", $"Can't construct phases due exception: {ex}");
+				return;
+			}
 
 			int tick = Environment.TickCount; // For performance-measurement
 
@@ -137,36 +167,41 @@
 
 			// Filter available targets
 			IEnumerable<string>? targets = GetTargets(parameters);
-			int totalTargetCount = targets.Count();
 
 			// Re-build file lists
 			Utils.PrintConsoleAndTitle("[RbFL] Re-building file lists...");
 			tick = Environment.TickCount;
-			RebuildFileLists(targets, taskList);
+			try
+			{
+				RebuildFileLists(targets, taskList);
+			}
+			catch (Exception ex)
+			{
+				Utils.PrintError("RbFL", $"Exception occurred while re-building filelists: {ex}");
+			}
 			Task.WhenAll(taskList).Wait();
 
 			Console.WriteLine($"[RbFL] Done rebuilding file lists (Took {Environment.TickCount - tick}ms)");
 			Console.WriteLine("[C] Now starting the compression...");
 
+			ConsoleColor prevColor = Console.BackgroundColor;
 			// Process phases
 			if (ProcessPhases(targets))
 			{
-				Console.WriteLine("[C] One or more file(s) failed to compress");
 				Console.BackgroundColor = ConsoleColor.DarkRed;
+				Console.WriteLine("[C] At least one error/warning occurred during the progress.");
+				Console.BackgroundColor = prevColor;
 			}
 			else
 			{
-				Console.WriteLine("[C] All files are successfully proceed without any error(s).");
 				Console.BackgroundColor = ConsoleColor.DarkBlue;
+				Console.WriteLine("[C] All files are successfully proceed without any error(s).");
+				Console.BackgroundColor = prevColor;
 			}
 			Console.WriteLine("[DFL] Press any key to delete leftover filelists and exit program...");
 
 			// Wait until any key has been pressed
-			ConsoleKeyInfo ci;
-			do
-
-				ci = Console.ReadKey();
-			while (ci.Modifiers != 0);
+			Utils.Pause();
 
 			// Delete any left-over filelist files
 			foreach (Dictionary<string, string>? files in RebuildedFileListMap.Values)
@@ -194,9 +229,10 @@
 		private bool RunParallelPhase(Phase phase, IEnumerable<string> paths)
 		{
 			string phaseName = phase.phaseName;
+			string prefix = $"PRL-{phaseName}"; //  'P' a 'R' a 'L' lel
 
 			bool includeRoot = LocalConfig.IncludeRootDirectory;
-			bool thereIsNullTask = false;
+			bool errorDetected = false;
 			var taskList = new List<Task>();
 
 			foreach (string? path in paths)
@@ -204,11 +240,10 @@
 				string currentTargetName = Utils.ExtractTargetName(path);
 				string archiveFileName = $"{(includeRoot ? "" : "..\\")}{currentTargetName}.7z";
 
-				Console.WriteLine("<<==================== <*> ====================>>");
-
 				if (RebuildedFileListMap.TryGetValue(currentTargetName, out Dictionary<string, string>? fileListMap) && fileListMap.TryGetValue(phaseName, out string? fileListPath) && fileListPath != null)
 				{
-					Utils.PrintConsoleAndTitle($"[PRL-{phaseName}] Start processing \"{path}\"");
+					Console.WriteLine("<<==================== <*> ====================>>");
+					Utils.PrintConsoleAndTitle($"[{prefix}] Start processing \"{path}\"");
 					Console.WriteLine();
 
 					Task? task = phase.PerformPhaseParallel(path, $"-ir@\"{fileListPath}\" -- \"{archiveFileName}\"");
@@ -216,24 +251,40 @@
 					if (task != null)
 						taskList.Add(task);
 					else
-						thereIsNullTask = true;
+					{
+						errorDetected = true;
+						Utils.PrintError(prefix, $"Failed to perform parallel phase {phaseName} to \"{path}\"");
+					}
 
 					Console.WriteLine();
-					Utils.PrintConsoleAndTitle($"[PRL-{phaseName}] Finished processing {path}");
+					Utils.PrintConsoleAndTitle($"[{prefix}] Finished processing {path}");
+					Console.WriteLine("<<==================== <~> <$> ====================>>");
 				}
-
-				Console.WriteLine("<<==================== <~> <$> ====================>>");
 			}
 
-			Utils.PrintConsoleAndTitle($"[PRL-{phaseName}] Waiting for all parallel compression processes are finished...");
+			if (taskList.Any())
+			{
 
-			int tick = Environment.TickCount;
-			var allTask = Task.WhenAll(taskList);
-			allTask.Wait();
+				Utils.PrintConsoleAndTitle($"[{prefix}] Waiting for all parallel compression processes are finished...");
 
-			Console.WriteLine($"[PRL-{phaseName}] All parallel compression processes are finished! (Took {Environment.TickCount - tick}ms)");
+				int tick = Environment.TickCount;
+				var allTask = Task.WhenAll(taskList);
 
-			return thereIsNullTask || allTask.IsFaulted;
+				try
+				{
+					allTask.Wait();
+				}
+				catch (AggregateException ex)
+				{
+					Utils.PrintError(prefix, $"AggregateException occurred during parallel execution: {ex}");
+				}
+
+				Console.WriteLine($"[{prefix}] All parallel compression processes are finished! (Took {Environment.TickCount - tick}ms)");
+
+				return errorDetected || allTask.IsFaulted;
+			}
+
+			return errorDetected;
 		}
 
 		private bool RunSequentialPhase(IEnumerable<Phase> phases, string path, string titlePrefix)

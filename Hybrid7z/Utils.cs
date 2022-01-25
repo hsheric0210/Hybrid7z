@@ -50,5 +50,24 @@
 			255 => "User stopped the process",
 			_ => "",
 		};
+
+		public static void Pause()
+		{
+			ConsoleKeyInfo ci;
+			do
+				ci = Console.ReadKey();
+			while (ci.Modifiers != 0);
+		}
+
+		public static void PrintError(string prefix, string details)
+		{
+			ConsoleColor prevColor = Console.BackgroundColor;
+			Console.BackgroundColor = ConsoleColor.DarkRed;
+			PrintConsoleAndTitle($"[{prefix}] {details}");
+			Console.WriteLine();
+			Console.WriteLine($"[{prefix}] Check the error details and press any key to continue process...");
+			Pause();
+			Console.BackgroundColor = prevColor;
+		}
 	}
 }

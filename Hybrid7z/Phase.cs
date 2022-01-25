@@ -12,8 +12,8 @@ namespace Hybrid7z
 		public readonly bool doesntSupportMultiThread;
 
 		public string? currentExecutablePath;
-		public Config? config;
 		public string? phaseParameter;
+		public Config? config;
 
 		public string[]? filterElements;
 
@@ -147,11 +147,15 @@ namespace Hybrid7z
 				{
 					int errorCode = sevenzip.ExitCode;
 					if (errorCode != 0)
-						Console.WriteLine($"[PRL-{phaseName}] Compression finished with errors/warnings. Error code {errorCode} ({Utils.Get7ZipExitCodeInformation(errorCode)})");
+					{
+						Console.WriteLine();
+						Console.WriteLine($"[PRL-{phaseName}] 7z process exited with errors/warnings. Error code {errorCode} ({Utils.Get7ZipExitCodeInformation(errorCode)})");
+					}
 				});
 			}
 			catch (Exception ex)
 			{
+				Console.WriteLine();
 				Console.WriteLine($"[PRL-{phaseName}] Exception while executing 7z in parallel: {ex}");
 			}
 
@@ -187,6 +191,7 @@ namespace Hybrid7z
 			}
 			catch (Exception ex)
 			{
+				Console.WriteLine();
 				Console.WriteLine($"{indexPrefix} [SQN] Exception while executing 7z: {ex}");
 			}
 
@@ -194,17 +199,11 @@ namespace Hybrid7z
 
 			if (error)
 			{
+				Console.WriteLine();
 				Console.Title = $"{indexPrefix} [SQN] Error compressing \"{path}\" - {phaseName} phase";
-
-				Console.BackgroundColor = ConsoleColor.DarkRed;
-				Console.WriteLine($"[SQN] Compression finished with errors/warnings. Error code {errorCode} ({Utils.Get7ZipExitCodeInformation(errorCode)})");
-				Console.WriteLine("[SQN] Check the error message and press any key to continue.");
-				Console.ReadKey();
-
-				Console.BackgroundColor = ConsoleColor.Black;
+				Utils.PrintError("SQN", $"7z process exited with errors/warnings. Error code {errorCode} ({Utils.Get7ZipExitCodeInformation(errorCode)})");
 			}
 
-			Console.WriteLine();
 			Console.WriteLine();
 			Utils.PrintConsoleAndTitle($"{indexPrefix} [SQN] \"{currentTargetName}\" - {phaseName} Phase Finished.");
 
