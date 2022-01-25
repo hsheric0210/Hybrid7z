@@ -29,10 +29,10 @@ namespace Hybrid7z
 			int lastError = GetLastError();
 			if (lastError != 0)
 				throw new Exception($"Failed to get value from configuration: Key={Key}, Section={Section ?? "null"}, Error=0x{lastError:X8}");
-			return RetVal.ToString();
+			return RetVal.ToString().Trim();
 		}
 
-		public void Write(string? Key, string? Value, string? Section = null) => WritePrivateProfileString(Section ?? EXE, Key, Value, Path);
+		public void Write(string? Key, string? Value, string? Section = null) => WritePrivateProfileString(Section ?? EXE, Key, Value.Trim(), Path);
 
 		public void DeleteKey(string Key, string? Section = null) => Write(Key, null, Section ?? EXE);
 

@@ -28,7 +28,7 @@ namespace Hybrid7z
 			if (!File.Exists(currentExecutablePath + CONFIG_NAME))
 			{
 				Console.WriteLine("[CFG] Writing default config");
-				SaveDefaultConfig(currentExecutablePath);
+				Config.SaveDefaults($"{currentExecutablePath}{CONFIG_NAME}");
 			}
 
 			// Start the program
@@ -211,19 +211,6 @@ namespace Hybrid7z
 						File.Delete(file);
 						Console.WriteLine($"[DFL] Deleted (re-builded) file list \"{file}\"");
 					}
-		}
-
-		private static void SaveDefaultConfig(string currentDir)
-		{
-			var ini = new IniFile($"{currentDir}{CONFIG_NAME}");
-			ini.Write("7z", "7z.exe");
-			ini.Write("BaseArgs", "a -t7z -mhe -ms=1g -mqs -slp -bt -bb3 -sae");
-			ini.Write("Args_PPMd", "-m0=PPMd -mx=9 -myx=9 -mmem=1024m -mo=32 -mmt=1");
-			ini.Write("Args_LZMA2", "-m0=LZMA2 -mx=9 -myx=9 -md=256m -mfb=273 -mmt=8 -mmtf -mmf=bt4 -mmc=10000 -mlc=4");
-			ini.Write("Args_Copy", "-m0=Copy -mx=0");
-			ini.Write("Args_x86", "-mf=BCJ2 -m0=LZMA2 -mx=9 -myx=9 -md=1024m -mfb=273 -mmt=8 -mmtf -mmf=bt4 -mmc=10000 -mlc=4");
-			ini.Write("Args_FastLZMA2", "-m0=FLZMA2 -mx=9 -myx=9 -md=1024m -mfb=273 -mmt=32 -mmtf -mlc=4");
-			ini.Write("IncludeRootDirectory", "0");
 		}
 
 		private bool RunParallelPhase(Phase phase, IEnumerable<string> paths)
