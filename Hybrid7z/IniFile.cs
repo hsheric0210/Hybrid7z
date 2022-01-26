@@ -32,7 +32,7 @@ namespace Hybrid7z
 			return RetVal.ToString().Trim();
 		}
 
-		public void Write(string? Key, string? Value, string? Section = null) => WritePrivateProfileString(Section ?? EXE, Key, Value.Trim(), Path);
+		public void Write(string? Key, string? Value, string? Section = null) => WritePrivateProfileString(Section ?? EXE, Key, Value?.Trim(), Path);
 
 		public void DeleteKey(string Key, string? Section = null) => Write(Key, null, Section ?? EXE);
 

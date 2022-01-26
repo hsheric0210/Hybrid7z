@@ -42,17 +42,14 @@ namespace Hybrid7z
 			}
 		}
 
-		private void InitializePhases(List<Task> taskList)
+		private void InitializePhases()
 		{
-			foreach (Phase? phase in Phases)
+			Parallel.ForEach(Phases, phase =>
 			{
 				Utils.PrintConsoleAndTitle($"[P] Initializing phase: {phase.phaseName}");
 				phase.Init(CurrentExecutablePath, LocalConfig);
-
-				Task? task = phase.ReadFileList();
-				if (task != null)
-					taskList.Add(task);
-			}
+				phase.ReadFileList();
+			});
 		}
 
 		private static IEnumerable<string> GetTargets(string[] parameters)
@@ -70,27 +67,27 @@ namespace Hybrid7z
 			return list;
 		}
 
-		private void RebuildFileLists(IEnumerable<string> targets, List<Task> taskList)
+		private void RebuildFileLists(IEnumerable<string> targets)
 		{
 			foreach (Phase phase in Phases)
 			{
 				string phaseName = phase.phaseName;
-				foreach (string target in targets)
+				Parallel.ForEach(targets, target =>
 				{
 					string targetName = Utils.ExtractTargetName(target);
-					taskList.Add(phase.RebuildFileList(target, $"{targetName}.").ContinueWith(task =>
-					{
-						if (!RebuildedFileListMap.ContainsKey(targetName))
-							RebuildedFileListMap.TryAdd(targetName, new());
+					Console.WriteLine($"[RbFL] Re-building file list for [file=\"{targetName}\", phase={phaseName}]");
+					string? path = phase.RebuildFileList(target, $"{targetName}.");
 
-						if (RebuildedFileListMap.TryGetValue(targetName, out Dictionary<string, string>? map) && task.Result != null)
-						{
-							string path = task.Result;
-							Console.WriteLine($"[RbFL] (Re-builded) File list for [file=\"{targetName}\", phase={phaseName}] -> {path}");
-							map.Add(phaseName, path);
-						}
-					}));
-				}
+					// Fail-safe
+					if (!RebuildedFileListMap.ContainsKey(targetName))
+						RebuildedFileListMap.TryAdd(targetName, new());
+
+					if (RebuildedFileListMap.TryGetValue(targetName, out Dictionary<string, string>? map) && path != null)
+					{
+						Console.WriteLine($"[RbFL] Re-builded File list for [file=\"{targetName}\", phase={phaseName}] -> {path}");
+						map.Add(phaseName, path);
+					}
+				});
 			}
 		}
 
@@ -158,12 +155,8 @@ namespace Hybrid7z
 
 			// Initialize phases
 			Utils.PrintConsoleAndTitle("[P] Initializing phases...");
-			var taskList = new List<Task>();
-			InitializePhases(taskList);
-			Task.WhenAll(taskList).Wait();
+			InitializePhases();
 			Console.WriteLine($"[P] Done initializing phases. (Took {Environment.TickCount - tick}ms)");
-
-			taskList.Clear(); // Re-use task list
 
 			// Filter available targets
 			IEnumerable<string>? targets = GetTargets(parameters);
@@ -173,20 +166,25 @@ namespace Hybrid7z
 			tick = Environment.TickCount;
 			try
 			{
-				RebuildFileLists(targets, taskList);
+				RebuildFileLists(targets);
 			}
 			catch (Exception ex)
 			{
 				Utils.PrintError("RbFL", $"Exception occurred while re-building filelists: {ex}");
 			}
-			Task.WhenAll(taskList).Wait();
 
 			Console.WriteLine($"[RbFL] Done rebuilding file lists (Took {Environment.TickCount - tick}ms)");
 			Console.WriteLine("[C] Now starting the compression...");
 
 			ConsoleColor prevColor = Console.BackgroundColor;
 			// Process phases
-			if (ProcessPhases(targets))
+			if (!targets.Any())
+			{
+				Console.BackgroundColor = ConsoleColor.DarkYellow;
+				Console.WriteLine("[C] No target supplied.");
+				Console.BackgroundColor = prevColor;
+			}
+			else if (ProcessPhases(targets))
 			{
 				Console.BackgroundColor = ConsoleColor.DarkRed;
 				Console.WriteLine("[C] At least one error/warning occurred during the progress.");
@@ -220,7 +218,9 @@ namespace Hybrid7z
 
 			bool includeRoot = LocalConfig.IncludeRootDirectory;
 			bool errorDetected = false;
-			var taskList = new List<Task>();
+
+			// System.Threading.Tasks.Parallel can't be used in here: Console messages should be in ordered
+			var taskList = new List<Task>(paths.Count());
 
 			foreach (string? path in paths)
 			{
@@ -251,7 +251,6 @@ namespace Hybrid7z
 
 			if (taskList.Any())
 			{
-
 				Utils.PrintConsoleAndTitle($"[{prefix}] Waiting for all parallel compression processes are finished...");
 
 				int tick = Environment.TickCount;

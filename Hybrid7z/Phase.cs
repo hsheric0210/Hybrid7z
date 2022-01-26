@@ -31,10 +31,10 @@ namespace Hybrid7z
 			phaseParameter = config.GetPhaseSpecificParameters(phaseName);
 		}
 
-		public Task? ReadFileList()
+		public void ReadFileList()
 		{
 			if (isTerminal)
-				return null;
+				return;
 
 			string filelistPath = currentExecutablePath + phaseName + FILELIST_SUFFIX;
 			if (File.Exists(filelistPath))
@@ -43,20 +43,18 @@ namespace Hybrid7z
 
 				try
 				{
-					return File.ReadAllLinesAsync(filelistPath).ContinueWith(task =>
+					string[] lines = File.ReadAllLines(filelistPath);
+					var validElements = new List<string>(lines.Length);
+					foreach (string line in lines)
 					{
-						var strings = new List<string>();
-						foreach (string line in task.Result)
+						string commentRemoved = line.Contains("//") ? line[..line.IndexOf("//")] : line;
+						if (!string.IsNullOrWhiteSpace(commentRemoved))
 						{
-							string commentRemoved = line.Contains("//") ? line[..line.IndexOf("//")] : line;
-							if (!string.IsNullOrWhiteSpace(commentRemoved))
-							{
-								Console.WriteLine($"[RFL] Readed from {filelistPath}: \"{commentRemoved}\"");
-								strings.Add(commentRemoved.Trim());
-							}
+							Console.WriteLine($"[RFL] Readed from {filelistPath}: \"{commentRemoved}\"");
+							validElements.Add(commentRemoved.Trim());
 						}
-						filterElements = strings.ToArray();
-					});
+					}
+					filterElements = validElements.ToArray();
 				}
 				catch (Exception ex)
 				{
@@ -65,57 +63,52 @@ namespace Hybrid7z
 			}
 			else
 				Console.WriteLine($"[RFL] Phase filter file not found for phase: {filelistPath}");
-
-			return null;
 		}
 
-		public Task<string?> RebuildFileList(string path, string fileNamePrefix)
+		public string? RebuildFileList(string path, string fileNamePrefix)
 		{
 			if (isTerminal || config == null || filterElements == null)
-				return Task.FromResult((string?)null);
+				return null;
 
 			bool includeRoot = config.IncludeRootDirectory;
 			string targetDirectoryName = Utils.ExtractTargetName(path);
 
-			return Task.Run(() =>
-			{
-				var newFilterElements = new List<string>();
-				var tasks = new List<Task>();
-				foreach (string? filter in filterElements)
-					tasks.Add(Task.Run(() =>
-					{
-						try
-						{
-							if (Directory.EnumerateFiles(path, filter, SearchOption.AllDirectories).Any())
-							{
-								Console.WriteLine($"[RbFL] Found files for filter \"{filter}\"");
-								newFilterElements.Add((includeRoot ? targetDirectoryName + "\\" : "") + filter);
-							}
-						}
-						catch (Exception ex)
-						{
-							Console.WriteLine($"[RbFL] Error re-building file list: {ex}");
-						}
-					}));
-
-				Task.WhenAll(tasks.ToArray()).Wait();
-
-				string? fileListPath = null;
-
-				if (newFilterElements.Any())
+			var newFilterElements = new List<string>();
+			var tasks = new List<Task>();
+			foreach (string? filter in filterElements)
+				tasks.Add(Task.Run(() =>
 				{
 					try
 					{
-						File.WriteAllLines(fileListPath = currentExecutablePath + fileNamePrefix + phaseName + REBUILDED_FILELIST_SUFFIX, newFilterElements);
+						if (Directory.EnumerateFiles(path, filter, SearchOption.AllDirectories).Any())
+						{
+							Console.WriteLine($"[RbFL] Found files for filter \"{filter}\"");
+							newFilterElements.Add((includeRoot ? targetDirectoryName + "\\" : "") + filter);
+						}
 					}
 					catch (Exception ex)
 					{
-						Console.WriteLine($"[RbFL] Error writing re-builded file list: {ex}");
+						Console.WriteLine($"[RbFL] Error re-building file list: {ex}");
 					}
-				}
+				}));
 
-				return fileListPath;
-			});
+			Task.WhenAll(tasks.ToArray()).Wait();
+
+			string? fileListPath = null;
+
+			if (newFilterElements.Any())
+			{
+				try
+				{
+					File.WriteAllLines(fileListPath = currentExecutablePath + fileNamePrefix + phaseName + REBUILDED_FILELIST_SUFFIX, newFilterElements);
+				}
+				catch (Exception ex)
+				{
+					Console.WriteLine($"[RbFL] Error writing re-builded file list: {ex}");
+				}
+			}
+
+			return fileListPath;
 		}
 
 		public Task? PerformPhaseParallel(string path, string extraParameters)

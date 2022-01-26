@@ -1,9 +1,11 @@
-﻿namespace Hybrid7z
+﻿using System.Collections.Concurrent;
+
+namespace Hybrid7z
 {
 	public static class Utils
 	{
-		private static readonly Dictionary<string, string> TargetNameCache = new();
-		private static readonly Dictionary<string, string> SuperNameCache = new();
+		private static readonly ConcurrentDictionary<string, string> TargetNameCache = new();
+		private static readonly ConcurrentDictionary<string, string> SuperNameCache = new();
 
 		public static string ExtractTargetName(string path)
 		{
@@ -13,7 +15,7 @@
 			TrimTrailingPathSeparators(ref path);
 
 			targetName = path[(path.LastIndexOf('\\') + 1)..];
-			TargetNameCache.Add(path, targetName);
+			TargetNameCache.TryAdd(path, targetName);
 			return targetName;
 		}
 
@@ -25,7 +27,7 @@
 			TrimTrailingPathSeparators(ref path);
 
 			superName = path[..(path.LastIndexOf('\\') + 1)];
-			SuperNameCache.Add(path, superName);
+			SuperNameCache.TryAdd(path, superName);
 			return superName;
 		}
 
