@@ -55,7 +55,11 @@ namespace Hybrid7z
 
 			foreach (string targetPath in parameters)
 				if (Directory.Exists(targetPath))
-					list.Add(targetPath);
+				{
+					string targetPathCopy = targetPath;
+					Utils.TrimTrailingPathSeparators(ref targetPathCopy);
+					list.Add(targetPathCopy);
+				}
 				else if (File.Exists(targetPath))
 					Console.WriteLine($"[T] WARNING: Currently, file are not supported (only directories are supported) - \"{targetPath}\"");
 				else

@@ -91,7 +91,7 @@ namespace Hybrid7z
 				{
 					try
 					{
-						if (Directory.EnumerateFiles(path, filter, SearchOption.AllDirectories).Any())
+						if ((!filter.Contains('\\') || !filter.StartsWith('\\') && Directory.Exists(path + '\\' + Utils.ExtractSuperDirectoryName(filter))) && Directory.EnumerateFiles(path, filter, SearchOption.AllDirectories).Any())
 						{
 							Console.WriteLine($"[RbFL] Found files for filter \"{filter}\"");
 							newFilterElements.Add((includeRoot ? targetDirectoryName + "\\" : "") + filter);
@@ -268,11 +268,12 @@ namespace Hybrid7z
 		// wtf formatter?
 		private static DataReceivedEventHandler GetBufferRedirectHandler(StringBuilder buffer, bool alsoConsole) => new((_, param) =>
 																																		   {
-																																			   if (!string.IsNullOrEmpty(param.Data))
+																																			   string? data = param.Data;
+																																			   if (!string.IsNullOrEmpty(data))
 																																			   {
-																																				   buffer.AppendLine(param.Data);
+																																				   buffer.AppendLine(data);
 																																				   if (alsoConsole)
-																																					   Console.WriteLine(param.Data);
+																																					   Console.WriteLine("[7z] " + data);
 																																			   }
 																																		   });
 
