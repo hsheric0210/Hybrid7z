@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Text;
 
 namespace Hybrid7z
 {
@@ -6,6 +7,16 @@ namespace Hybrid7z
 	{
 		public const string FILELIST_SUFFIX = ".txt";
 		public const string REBUILDED_FILELIST_SUFFIX = ".lst";
+
+		private const string SEVENZIP_STDOUT_LOG_NAME = "{0:yyyy-MM-dd_HH-mm-ss-FFFFFF}-{1}_{2}({3})-STDOUT.log";
+		private const string SEVENZIP_STDERR_LOG_NAME = "{0:yyyy-MM-dd_HH-mm-ss-FFFFFF}-{1}_{2}({3})-STDERR.log";
+
+		private static readonly UTF8Encoding UTF_8_WITHOUT_BOM = new(false);
+		private static readonly FileStreamOptions LOG_FILE_STREAM_OPTIONS = new()
+		{
+			Access = FileAccess.Write,
+			Mode = FileMode.Create
+		};
 
 		public readonly string phaseName;
 		public readonly bool isTerminal;
@@ -50,7 +61,7 @@ namespace Hybrid7z
 						string commentRemoved = line.Contains("//") ? line[..line.IndexOf("//")] : line;
 						if (!string.IsNullOrWhiteSpace(commentRemoved))
 						{
-							Console.WriteLine($"[RFL] Readed from {filelistPath}: \"{commentRemoved}\"");
+							// Console.WriteLine($"[RFL] Readed from {filelistPath}: \"{commentRemoved}\"");
 							validElements.Add(commentRemoved.Trim());
 						}
 					}
@@ -111,62 +122,14 @@ namespace Hybrid7z
 			return fileListPath;
 		}
 
-		public Task? PerformPhaseParallel(string path, string extraParameters)
-		{
-			if (config == null)
-				return null;
-
-			string currentTargetName = Utils.ExtractTargetName(path);
-
-			Console.WriteLine($">> ===== ----- {phaseName} Phase (Parallel) ----- ===== <<");
-			Utils.PrintConsoleAndTitle($"[PRL-{phaseName}] Queued \"{currentTargetName}\" - {phaseName} Phase");
-			Console.WriteLine();
-
-			Task? task = null;
-
-			try
-			{
-				Process sevenzip = new();
-				sevenzip.StartInfo.FileName = config.SevenZipExecutable;
-				sevenzip.StartInfo.WorkingDirectory = $"{(config.IncludeRootDirectory ? Utils.ExtractSuperDirectoryName(path) : path)}\\";
-				sevenzip.StartInfo.Arguments = $"{config.CommonArguments} {phaseParameter} {extraParameters}";
-				sevenzip.StartInfo.UseShellExecute = true;
-
-				Console.WriteLine($"[PRL-{phaseName}] Params: {sevenzip.StartInfo.Arguments}");
-
-				sevenzip.Start();
-
-				task = sevenzip.WaitForExitAsync().ContinueWith((task) =>
-				{
-					int errorCode = sevenzip.ExitCode;
-					if (errorCode != 0)
-					{
-						Console.WriteLine();
-						Console.WriteLine($"[PRL-{phaseName}] 7z process exited with errors/warnings. Error code {errorCode} ({Utils.Get7ZipExitCodeInformation(errorCode)})");
-					}
-				});
-			}
-			catch (Exception ex)
-			{
-				Console.WriteLine();
-				Console.WriteLine($"[PRL-{phaseName}] Exception while executing 7z in parallel: {ex}");
-			}
-
-			return task;
-		}
-
-		public bool PerformPhaseSequential(string path, string indexPrefix, string extraParameters)
+		public bool PerformPhaseParallel(string path, string extraParameters)
 		{
 			if (config == null)
 				return false;
 
 			string currentTargetName = Utils.ExtractTargetName(path);
-
-			Console.WriteLine($">> ===== -----<< {phaseName} Phase (Sequential) >>----- ===== <<");
-			Utils.PrintConsoleAndTitle($"{indexPrefix} [SQN] Started {indexPrefix} \"{currentTargetName}\" - {phaseName} Phase");
-			Console.WriteLine();
-
-			int errorCode = -1;
+			string prefix = $"[PRL-{phaseName}(\"{currentTargetName}\")]";
+			DateTime dateTime = DateTime.Now;
 
 			try
 			{
@@ -175,11 +138,96 @@ namespace Hybrid7z
 				sevenzip.StartInfo.WorkingDirectory = $"{(config.IncludeRootDirectory ? Utils.ExtractSuperDirectoryName(path) : path)}\\";
 				sevenzip.StartInfo.Arguments = $"{config.CommonArguments} {phaseParameter} {extraParameters}";
 				sevenzip.StartInfo.UseShellExecute = false;
-
-				Console.WriteLine($"{indexPrefix} [SQN] Params: {sevenzip.StartInfo.Arguments}");
+				sevenzip.StartInfo.RedirectStandardOutput = true;
+				sevenzip.StartInfo.RedirectStandardError = true;
 
 				sevenzip.Start();
+
+				string outFileNameFormatted = string.Format(SEVENZIP_STDOUT_LOG_NAME, dateTime, sevenzip.Id, phaseName, currentTargetName);
+				string errFileNameFormatted = string.Format(SEVENZIP_STDERR_LOG_NAME, dateTime, sevenzip.Id, phaseName, currentTargetName);
+				string outFilePath = $"{currentExecutablePath}logs\\{outFileNameFormatted}";
+				string errFilePath = $"{currentExecutablePath}logs\\{errFileNameFormatted}";
+
+				// Redirect STDOUT, STDERR
+				(StringBuilder stdoutBuffer, StringBuilder stderrBuffer) = AttachLogBuffer(sevenzip, false);
+				sevenzip.BeginOutputReadLine();
+				sevenzip.BeginErrorReadLine();
+
 				sevenzip.WaitForExit();
+
+				int errorCode = sevenzip.ExitCode;
+				if (errorCode != 0)
+				{
+					Console.WriteLine();
+					Console.WriteLine($"{prefix} 7z process exited with errors/warnings. Error code: {errorCode} - {Utils.Get7ZipExitCodeInformation(errorCode)}. Check the following log files for more detailed informations.");
+				}
+
+				// Write log buffer to the file and print the path
+				if (WriteLog(outFilePath, stdoutBuffer))
+					Console.WriteLine($"{prefix} STDOUT log: \"{outFilePath}\"");
+				if (WriteLog(errFilePath, stderrBuffer))
+					Console.WriteLine($"{prefix} STDERR log: \"{errFilePath}\"");
+
+				return errorCode == 0;
+			}
+			catch (Exception ex)
+			{
+				Console.WriteLine();
+				Console.WriteLine($"{prefix} Exception while executing 7z in parallel: {ex}");
+				return false;
+			}
+		}
+
+		public bool PerformPhaseSequential(string path, string indexPrefix, string extraParameters)
+		{
+			if (config == null)
+				return false;
+
+			string currentTargetName = Utils.ExtractTargetName(path);
+			int errorCode = -1;
+			DateTime dateTime = DateTime.Now;
+
+			Console.WriteLine($">> ===== -----<< {phaseName} Phase (Sequential) >>----- ===== <<");
+			Utils.PrintConsoleAndTitle($"{indexPrefix} [SQN] Started {indexPrefix} \"{currentTargetName}\" - {phaseName} Phase");
+			Console.WriteLine();
+
+			try
+			{
+				Process sevenzip = new();
+				sevenzip.StartInfo.FileName = config.SevenZipExecutable;
+				sevenzip.StartInfo.WorkingDirectory = $"{(config.IncludeRootDirectory ? Utils.ExtractSuperDirectoryName(path) : path)}\\";
+				sevenzip.StartInfo.Arguments = $"{config.CommonArguments} {phaseParameter} {extraParameters}";
+				sevenzip.StartInfo.UseShellExecute = false;
+				sevenzip.StartInfo.RedirectStandardOutput = true;
+				sevenzip.StartInfo.RedirectStandardError = true;
+
+				sevenzip.Start();
+
+				string outFileNameFormatted = string.Format(SEVENZIP_STDOUT_LOG_NAME, dateTime, sevenzip.Id, phaseName, currentTargetName);
+				string errFileNameFormatted = string.Format(SEVENZIP_STDERR_LOG_NAME, dateTime, sevenzip.Id, phaseName, currentTargetName);
+				string outFilePath = $"{currentExecutablePath}logs\\{outFileNameFormatted}";
+				string errFilePath = $"{currentExecutablePath}logs\\{errFileNameFormatted}";
+
+				// Redirect STDOUT, STDERR
+				(StringBuilder stdoutBuffer, StringBuilder stderrBuffer) = AttachLogBuffer(sevenzip, true);
+				sevenzip.BeginOutputReadLine();
+				sevenzip.BeginErrorReadLine();
+
+				sevenzip.WaitForExit();
+
+				// Write log buffer to the file and print the path
+				try
+				{
+					if (WriteLog(outFilePath, stdoutBuffer))
+						Console.WriteLine($"{indexPrefix} [SQN] STDOUT log: \"{outFilePath}\"");
+					if (WriteLog(errFilePath, stderrBuffer))
+						Console.WriteLine($"{indexPrefix} [SQN] STDERR log: \"{errFilePath}\"");
+				}
+				catch (Exception ex)
+				{
+					Console.WriteLine($"{indexPrefix} [SQN] Failed to write log 7z log files: {ex}");
+				}
+
 				errorCode = sevenzip.ExitCode;
 			}
 			catch (Exception ex)
@@ -194,7 +242,7 @@ namespace Hybrid7z
 			{
 				Console.WriteLine();
 				Console.Title = $"{indexPrefix} [SQN] Error compressing \"{path}\" - {phaseName} phase";
-				Utils.PrintError("SQN", $"7z process exited with errors/warnings. Error code {errorCode} ({Utils.Get7ZipExitCodeInformation(errorCode)})");
+				Utils.PrintError("SQN", $"7z process exited with errors/warnings. Error code: {errorCode} ({Utils.Get7ZipExitCodeInformation(errorCode)}). Check the following log files for more detailed informations.");
 			}
 
 			Console.WriteLine();
@@ -202,5 +250,81 @@ namespace Hybrid7z
 
 			return error;
 		}
+
+		private static bool WriteLog(string path, StringBuilder sb)
+		{
+			if (sb.Length > 0)
+			{
+				var stream = new StreamWriter(path, UTF_8_WITHOUT_BOM, LOG_FILE_STREAM_OPTIONS);
+				stream.Write(sb.ToString());
+				stream.Close();
+
+				return true;
+			}
+
+			return false;
+		}
+
+		// wtf formatter?
+		private static DataReceivedEventHandler GetBufferRedirectHandler(StringBuilder buffer, bool alsoConsole) => new((_, param) =>
+																																		   {
+																																			   if (!string.IsNullOrEmpty(param.Data))
+																																			   {
+																																				   buffer.AppendLine(param.Data);
+																																				   if (alsoConsole)
+																																					   Console.WriteLine(param.Data);
+																																			   }
+																																		   });
+
+		private static (StringBuilder, StringBuilder) AttachLogBuffer(Process process, bool alsoConsole)
+		{
+			var stdoutBuffer = new StringBuilder();
+			var stderrBuffer = new StringBuilder();
+			process.OutputDataReceived += GetBufferRedirectHandler(stdoutBuffer, alsoConsole);
+			process.ErrorDataReceived += GetBufferRedirectHandler(stderrBuffer, alsoConsole);
+			return (stdoutBuffer, stderrBuffer);
+		}
+
+		//public Task? PerformPhaseParallelAsync(string path, string extraParameters)
+		//{
+		//	if (config == null)
+		//		return null;
+
+		//	string currentTargetName = Utils.ExtractTargetName(path);
+
+		//	Console.WriteLine($">> ===== ----- {phaseName} Phase (Parallel) ----- ===== <<");
+		//	Utils.PrintConsoleAndTitle($"[PRL-{phaseName}] Queued \"{currentTargetName}\" - {phaseName} Phase");
+		//	Console.WriteLine();
+
+		//	Task? task = null;
+
+		//	try
+		//	{
+		//		Process sevenzip = new();
+		//		sevenzip.StartInfo.FileName = config.SevenZipExecutable;
+		//		sevenzip.StartInfo.WorkingDirectory = $"{(config.IncludeRootDirectory ? Utils.ExtractSuperDirectoryName(path) : path)}\\";
+		//		sevenzip.StartInfo.Arguments = $"{config.CommonArguments} {phaseParameter} {extraParameters}";
+		//		sevenzip.StartInfo.UseShellExecute = true;
+
+		//		sevenzip.Start();
+
+		//		task = sevenzip.WaitForExitAsync().ContinueWith((task) =>
+		//		{
+		//			int errorCode = sevenzip.ExitCode;
+		//			if (errorCode != 0)
+		//			{
+		//				Console.WriteLine();
+		//				Console.WriteLine($"[PRL-{phaseName}] 7z process exited with errors/warnings. Error code {errorCode} ({Utils.Get7ZipExitCodeInformation(errorCode)})");
+		//			}
+		//		});
+		//	}
+		//	catch (Exception ex)
+		//	{
+		//		Console.WriteLine();
+		//		Console.WriteLine($"[PRL-{phaseName}] Exception while executing 7z in parallel: {ex}");
+		//	}
+
+		//	return task;
+		//}
 	}
 }

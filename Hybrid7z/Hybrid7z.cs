@@ -7,16 +7,16 @@ namespace Hybrid7z
 		public const string VERSION = "0.1";
 		public const string CONFIG_NAME = "Hybrid7z.ini";
 
-		public readonly Phase[] Phases;
-		public readonly string CurrentExecutablePath;
+		public readonly Phase[] phases;
+		public readonly string currentExecutablePath;
 
-		private readonly Config LocalConfig;
+		private readonly Config config;
 
 		// KEY: Target Directory Name (Not Path)
 		// VALUE:
 		// *** KEY: Phase name
 		// *** VALUE: Path of re-builded file list
-		public ConcurrentDictionary<string, Dictionary<string, string>> RebuildedFileListMap = new();
+		public ConcurrentDictionary<string, Dictionary<string, string>> rebuildedFileLists = new();
 
 		public static void Main(string[] args)
 		{
@@ -42,15 +42,12 @@ namespace Hybrid7z
 			}
 		}
 
-		private void InitializePhases()
-		{
-			Parallel.ForEach(Phases, phase =>
-			{
-				Utils.PrintConsoleAndTitle($"[P] Initializing phase: {phase.phaseName}");
-				phase.Init(CurrentExecutablePath, LocalConfig);
-				phase.ReadFileList();
-			});
-		}
+		private void InitializePhases() => Parallel.ForEach(phases, phase =>
+										   {
+											   Utils.PrintConsoleAndTitle($"[P] Initializing phase: {phase.phaseName}");
+											   phase.Init(currentExecutablePath, config);
+											   phase.ReadFileList();
+										   });
 
 		private static IEnumerable<string> GetTargets(string[] parameters)
 		{
@@ -69,7 +66,7 @@ namespace Hybrid7z
 
 		private void RebuildFileLists(IEnumerable<string> targets)
 		{
-			foreach (Phase phase in Phases)
+			foreach (Phase phase in phases)
 			{
 				string phaseName = phase.phaseName;
 				Parallel.ForEach(targets, target =>
@@ -79,12 +76,12 @@ namespace Hybrid7z
 					string? path = phase.RebuildFileList(target, $"{targetName}.");
 
 					// Fail-safe
-					if (!RebuildedFileListMap.ContainsKey(targetName))
-						RebuildedFileListMap.TryAdd(targetName, new());
+					if (!rebuildedFileLists.ContainsKey(targetName))
+						rebuildedFileLists.TryAdd(targetName, new());
 
-					if (RebuildedFileListMap.TryGetValue(targetName, out Dictionary<string, string>? map) && path != null)
+					if (rebuildedFileLists.TryGetValue(targetName, out Dictionary<string, string>? map) && path != null)
 					{
-						Console.WriteLine($"[RbFL] Re-builded File list for [file=\"{targetName}\", phase={phaseName}] -> {path}");
+						// Console.WriteLine($"[RbFL] Re-builded File list for [file=\"{targetName}\", phase={phaseName}] -> {path}");
 						map.Add(phaseName, path);
 					}
 				});
@@ -95,8 +92,12 @@ namespace Hybrid7z
 		{
 			bool error = false;
 
+			// Create log file repository
+			if (targets.Any())
+				Directory.CreateDirectory(currentExecutablePath + "logs");
+
 			var sequentialPhases = new List<Phase>();
-			foreach (Phase? phase in Phases)
+			foreach (Phase? phase in phases)
 				if (phase.doesntSupportMultiThread)
 					error = RunParallelPhase(phase, targets) || error;
 				else
@@ -119,14 +120,14 @@ namespace Hybrid7z
 		public Hybrid7z(string currentExecutablePath, string[] parameters)
 #pragma warning restore CS8618
 		{
-			CurrentExecutablePath = currentExecutablePath;
+			this.currentExecutablePath = currentExecutablePath;
 
 			Utils.PrintConsoleAndTitle($"[CFG] Loading config... ({CONFIG_NAME})");
 
 			try
 			{
 				// Load config
-				LocalConfig = new Config(new IniFile($"{currentExecutablePath}{CONFIG_NAME}"));
+				config = new Config(new IniFile($"{currentExecutablePath}{CONFIG_NAME}"));
 			}
 			catch (Exception ex)
 			{
@@ -138,12 +139,12 @@ namespace Hybrid7z
 			try
 			{
 				// Construct phases
-				Phases = new Phase[5];
-				Phases[0] = new Phase("PPMd", false, true);
-				Phases[1] = new Phase("Copy", false, true);
-				Phases[2] = new Phase("LZMA2", false, false);
-				Phases[3] = new Phase("x86", false, false);
-				Phases[4] = new Phase("FastLZMA2", true, false);
+				phases = new Phase[5];
+				phases[0] = new Phase("PPMd", false, true);
+				phases[1] = new Phase("Copy", false, true);
+				phases[2] = new Phase("LZMA2", false, false);
+				phases[3] = new Phase("x86", false, false);
+				phases[4] = new Phase("FastLZMA2", true, false);
 			}
 			catch (Exception ex)
 			{
@@ -202,7 +203,7 @@ namespace Hybrid7z
 			Utils.Pause();
 
 			// Delete any left-over filelist files
-			foreach (Dictionary<string, string>? files in RebuildedFileListMap.Values)
+			foreach (Dictionary<string, string>? files in rebuildedFileLists.Values)
 				foreach (string? file in files.Values)
 					if (file != null && File.Exists(file))
 					{
@@ -216,66 +217,102 @@ namespace Hybrid7z
 			string phaseName = phase.phaseName;
 			string prefix = $"PRL-{phaseName}"; //  'P' a 'R' a 'L' lel
 
-			bool includeRoot = LocalConfig.IncludeRootDirectory;
-			bool errorDetected = false;
+			bool includeRoot = config.IncludeRootDirectory;
 
-			// System.Threading.Tasks.Parallel can't be used in here: Console messages should be in ordered
-			var taskList = new List<Task>(paths.Count());
+			// Because Interlocked.CompareExchange doesn't supports bool
+			int error = 0;
 
-			foreach (string? path in paths)
+			Console.WriteLine($"<<==================== Starting Parallel-{phaseName} ====================>>");
+
+			try
 			{
-				string currentTargetName = Utils.ExtractTargetName(path);
-				string archiveFileName = $"{(includeRoot ? "" : "..\\")}{currentTargetName}.7z";
-
-				if (RebuildedFileListMap.TryGetValue(currentTargetName, out Dictionary<string, string>? fileListMap) && fileListMap.TryGetValue(phaseName, out string? fileListPath) && fileListPath != null)
+				Parallel.ForEach(paths, path =>
 				{
-					Console.WriteLine("<<==================== <*> ====================>>");
-					Utils.PrintConsoleAndTitle($"[{prefix}] Start processing \"{path}\"");
-					Console.WriteLine();
-
-					Task? task = phase.PerformPhaseParallel(path, $"-ir@\"{fileListPath}\" -- \"{archiveFileName}\"");
-
-					if (task != null)
-						taskList.Add(task);
-					else
-					{
-						errorDetected = true;
-						Utils.PrintError(prefix, $"Failed to perform parallel phase {phaseName} to \"{path}\"");
-					}
-
-					Console.WriteLine();
-					Utils.PrintConsoleAndTitle($"[{prefix}] Finished processing {path}");
-					Console.WriteLine("<<==================== <~> <$> ====================>>");
-				}
+					string currentTargetName = Utils.ExtractTargetName(path);
+					if (rebuildedFileLists.TryGetValue(currentTargetName, out Dictionary<string, string>? fileListMap) && fileListMap.TryGetValue(phaseName, out string? fileListPath) && fileListPath != null && !phase.PerformPhaseParallel(path, $"-ir@\"{fileListPath}\" -- \"{$"{(includeRoot ? "" : "..\\")}{currentTargetName}.7z"}\""))
+						Interlocked.CompareExchange(ref error, 1, 0);
+				});
+			}
+			catch (AggregateException ex)
+			{
+				Utils.PrintError(prefix, $"AggregateException occurred during parallel execution: {ex}");
+				error = 1;
 			}
 
-			if (taskList.Any())
-			{
-				Utils.PrintConsoleAndTitle($"[{prefix}] Waiting for all parallel compression processes are finished...");
+			if (error != 0)
+				Utils.PrintError(prefix, $"Error running phase {phaseName} in parallel.");
+			else
+				Utils.PrintConsoleAndTitle($"[{prefix}] Successfully finished phase {phaseName} without any errors.");
+			Console.WriteLine($"<<==================== Finished Parallel-{phaseName} ====================>>");
 
-				int tick = Environment.TickCount;
-				var allTask = Task.WhenAll(taskList);
-
-				try
-				{
-					allTask.Wait();
-				}
-				catch (AggregateException ex)
-				{
-					Utils.PrintError(prefix, $"AggregateException occurred during parallel execution: {ex}");
-				}
-
-				Console.WriteLine($"[{prefix}] All parallel compression processes are finished! (Took {Environment.TickCount - tick}ms)");
-
-				return errorDetected || allTask.IsFaulted;
-			}
-
-			return errorDetected;
+			return error != 0;
 		}
+
+		//private bool RunParallelPhase2(Phase phase, IEnumerable<string> paths)
+		//{
+		//	string phaseName = phase.phaseName;
+		//	string prefix = $"PRL-{phaseName}"; //  'P' a 'R' a 'L' lel
+
+		//	bool includeRoot = config.IncludeRootDirectory;
+		//	bool errorDetected = false;
+
+		//	// System.Threading.Tasks.Parallel can't be used in here: Task-list empty check based logics, Console messages should be in ordered
+		//	var taskList = new List<Task>(paths.Count());
+
+		//	foreach (string? path in paths)
+		//	{
+		//		string currentTargetName = Utils.ExtractTargetName(path);
+		//		string archiveFileName = $"{(includeRoot ? "" : "..\\")}{currentTargetName}.7z";
+
+		//		if (rebuildedFileLists.TryGetValue(currentTargetName, out Dictionary<string, string>? fileListMap) && fileListMap.TryGetValue(phaseName, out string? fileListPath) && fileListPath != null)
+		//		{
+		//			Console.WriteLine($"<<==================== Starting Parallel-{phaseName} ====================>>");
+		//			Utils.PrintConsoleAndTitle($"[{prefix}] Start processing \"{path}\"");
+		//			Console.WriteLine();
+
+		//			Task? task = phase.PerformPhaseParallelAsync(path, $"-ir@\"{fileListPath}\" -- \"{archiveFileName}\"");
+
+		//			if (task != null)
+		//				taskList.Add(task);
+		//			else
+		//			{
+		//				errorDetected = true;
+		//				Utils.PrintError(prefix, $"Failed to perform parallel phase {phaseName} to \"{path}\"");
+		//			}
+
+		//			Console.WriteLine();
+		//			Utils.PrintConsoleAndTitle($"[{prefix}] Finished processing {path}");
+		//			Console.WriteLine($"<<==================== Finished Parallel-{phaseName} ====================>>");
+		//		}
+		//	}
+
+		//	if (taskList.Any())
+		//	{
+		//		Utils.PrintConsoleAndTitle($"[{prefix}] Waiting for all parallel compression processes are finished...");
+
+		//		int tick = Environment.TickCount;
+		//		var allTask = Task.WhenAll(taskList);
+
+		//		try
+		//		{
+		//			allTask.Wait();
+		//		}
+		//		catch (AggregateException ex)
+		//		{
+		//			Utils.PrintError(prefix, $"AggregateException occurred during parallel execution: {ex}");
+		//		}
+
+		//		Console.WriteLine($"[{prefix}] All parallel compression processes are finished! (Took {Environment.TickCount - tick}ms)");
+
+		//		return errorDetected || allTask.IsFaulted;
+		//	}
+
+		//	return errorDetected;
+		//}
 
 		private bool RunSequentialPhase(IEnumerable<Phase> phases, string path, string titlePrefix)
 		{
-			bool includeRoot = LocalConfig.IncludeRootDirectory;
+			bool includeRoot = config.IncludeRootDirectory;
 			string currentTargetName = path[(path.LastIndexOf('\\') + 1)..];
 			string archiveFileName = $"{(includeRoot ? "" : "..\\")}{currentTargetName}.7z";
 
@@ -284,25 +321,24 @@ namespace Hybrid7z
 			Console.WriteLine("<<=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= <*> =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=>>");
 
 			Utils.PrintConsoleAndTitle($"{titlePrefix} [SQN] Start processing \"{path}\"");
-			Console.WriteLine();
 
 			foreach (Phase? phase in phases)
 			{
 				if (phase.isTerminal)
 				{
 					string? list = "";
-					if (RebuildedFileListMap.TryGetValue(currentTargetName, out Dictionary<string, string>? map))
+					if (rebuildedFileLists.TryGetValue(currentTargetName, out Dictionary<string, string>? map))
 						list = string.Join(" ", map.Values.ToList().ConvertAll((from) => $"-xr@\"{from}\""));
 					errorOccurred = phase.PerformPhaseSequential(path, titlePrefix, $"-r {list} -- \"{archiveFileName}\" \"{(includeRoot ? currentTargetName : "*")}\"") || errorOccurred;
 				}
-				else if (RebuildedFileListMap.TryGetValue(currentTargetName, out Dictionary<string, string>? map) && map.TryGetValue(phase.phaseName, out string? fileListPath) && fileListPath != null)
+				else if (rebuildedFileLists.TryGetValue(currentTargetName, out Dictionary<string, string>? map) && map.TryGetValue(phase.phaseName, out string? fileListPath) && fileListPath != null)
 					errorOccurred = phase.PerformPhaseSequential(path, titlePrefix, $"-ir@\"{fileListPath}\" -- \"{archiveFileName}\"") || errorOccurred;
 			}
 
 			Console.WriteLine();
 			Utils.PrintConsoleAndTitle($"{titlePrefix} [SQN] Finished processing {path}");
 
-			Console.WriteLine("<<=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= <$> <~> =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=>>");
+			Console.WriteLine("<<=-=-=-=-=-=-=-=-=-=-=-=-=-=-= <$> <~> =-=-=-=-=-=-=-=-=-=-=-=-=-=-=>>");
 
 			return errorOccurred;
 		}
