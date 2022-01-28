@@ -22,7 +22,7 @@ namespace Hybrid7z
 
 		public IniFile(string? IniPath = null) => Path = new FileInfo(IniPath ?? EXE + ".ini").FullName;
 
-		public string Read(string Key, string? Section = null)
+		public string read(string Key, string? Section = null)
 		{
 			var RetVal = new StringBuilder(255);
 			GetPrivateProfileString(Section ?? EXE, Key, "", RetVal, 255, Path);
@@ -32,12 +32,12 @@ namespace Hybrid7z
 			return RetVal.ToString().Trim();
 		}
 
-		public void Write(string? Key, string? Value, string? Section = null) => WritePrivateProfileString(Section ?? EXE, Key, Value?.Trim(), Path);
+		public void write(string? Key, string? Value, string? Section = null) => WritePrivateProfileString(Section ?? EXE, Key, Value?.Trim(), Path);
 
-		public void DeleteKey(string Key, string? Section = null) => Write(Key, null, Section ?? EXE);
+		public void deleteKey(string Key, string? Section = null) => write(Key, null, Section ?? EXE);
 
-		public void DeleteSection(string? Section = null) => Write(null, null, Section ?? EXE);
+		public void deleteSection(string? Section = null) => write(null, null, Section ?? EXE);
 
-		public bool KeyExists(string Key, string? Section = null) => Read(Key, Section).Length > 0;
+		public bool keyExists(string Key, string? Section = null) => read(Key, Section).Length > 0;
 	}
 }

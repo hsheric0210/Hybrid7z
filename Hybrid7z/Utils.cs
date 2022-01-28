@@ -7,43 +7,43 @@ namespace Hybrid7z
 		private static readonly ConcurrentDictionary<string, string> TargetNameCache = new();
 		private static readonly ConcurrentDictionary<string, string> SuperNameCache = new();
 
-		public static string ExtractTargetName(string path)
+		public static string extractTargetName(string path)
 		{
 			if (TargetNameCache.TryGetValue(path, out string? targetName))
 				return targetName;
 
-			TrimTrailingPathSeparators(ref path);
+			trimTrailingPathSeparators(ref path);
 
 			targetName = path[(path.LastIndexOf('\\') + 1)..];
 			TargetNameCache.TryAdd(path, targetName);
 			return targetName;
 		}
 
-		public static string ExtractSuperDirectoryName(string path)
+		public static string extractSuperDirectoryName(string path)
 		{
 			if (SuperNameCache.TryGetValue(path, out string? superName))
 				return superName;
 
-			TrimTrailingPathSeparators(ref path);
+			trimTrailingPathSeparators(ref path);
 
 			superName = path[..(path.LastIndexOf('\\') + 1)];
 			SuperNameCache.TryAdd(path, superName);
 			return superName;
 		}
 
-		public static void PrintConsoleAndTitle(string message)
+		public static void printConsoleAndTitle(string message)
 		{
 			Console.WriteLine(message);
 			Console.Title = message;
 		}
 
-		public static void TrimTrailingPathSeparators(ref string path)
+		public static void trimTrailingPathSeparators(ref string path)
 		{
 			while (path.EndsWith("\\"))
 				path = path[(path.LastIndexOf('\\') + 1)..];
 		}
 
-		public static string Get7ZipExitCodeInformation(int exitCode) => exitCode switch
+		public static string get7ZipExitCodeInformation(int exitCode) => exitCode switch
 		{
 			1 => "Non-fatal warning(s)",
 			2 => "Fatal error",
@@ -53,7 +53,7 @@ namespace Hybrid7z
 			_ => "",
 		};
 
-		public static void Pause()
+		public static void pause()
 		{
 			ConsoleKeyInfo ci;
 			do
@@ -61,14 +61,14 @@ namespace Hybrid7z
 			while (ci.Modifiers != 0);
 		}
 
-		public static void PrintError(string prefix, string details)
+		public static void printError(string prefix, string details)
 		{
 			ConsoleColor prevColor = Console.BackgroundColor;
 			Console.BackgroundColor = ConsoleColor.DarkRed;
-			PrintConsoleAndTitle($"[{prefix}] {details}");
+			printConsoleAndTitle($"[{prefix}] {details}");
 			Console.WriteLine();
 			Console.WriteLine($"[{prefix}] Check the error details and press any key to continue process...");
-			Pause();
+			pause();
 			Console.BackgroundColor = prevColor;
 		}
 	}

@@ -12,28 +12,28 @@
 		{
 			this.config = config;
 
-			SevenZipExecutable = config.Read("Executable", "7z");
-			CommonArguments = config.Read("BaseParameters", "7z");
+			SevenZipExecutable = config.read("Executable", "7z");
+			CommonArguments = config.read("BaseParameters", "7z");
 
-			var includeRootStr = config.Read("IncludeRootDirectory", "Misc");
+			var includeRootStr = config.read("IncludeRootDirectory", "Misc");
 			IncludeRootDirectory = !string.Equals(includeRootStr, "0") && !string.Equals(includeRootStr, "false", StringComparison.InvariantCultureIgnoreCase) && !string.Equals(includeRootStr, "no", StringComparison.InvariantCultureIgnoreCase);
 		}
 
-		public string GetPhaseSpecificParameters(string phaseName) => config.Read($"{phaseName}", "Parameters");
+		public string getPhaseSpecificParameters(string phaseName) => config.read($"{phaseName}", "Parameters");
 
-		public static void SaveDefaults(string path)
+		public static void saveDefaults(string path)
 		{
 			var ini = new IniFile(path);
-			ini.Write("Executable", "7z.exe", "7z");
-			ini.Write("BaseParameters", "a -t7z -mhe -ms=1g -mqs -slp -bt -bb3 -sae", "7z");
+			ini.write("Executable", "7z.exe", "7z");
+			ini.write("BaseParameters", "a -t7z -mhe -ms=1g -mqs -slp -bt -bb3 -sae", "7z");
 
-			ini.Write("PPMd", "-m0=PPMd -mx=9 -myx=9 -mmem=1024m -mo=32 -mmt=1", "Parameters");
-			ini.Write("LZMA2", "-m0=LZMA2 -mx=9 -myx=9 -md=256m -mfb=273 -mmt=8 -mmtf -mmf=bt4 -mmc=10000 -mlc=4", "Parameters");
-			ini.Write("Copy", "-m0=Copy -mx=0", "Parameters");
-			ini.Write("x86", "-mf=BCJ2 -m0=LZMA2 -mx=9 -myx=9 -md=1024m -mfb=273 -mmt=8 -mmtf -mmf=bt4 -mmc=10000 -mlc=4", "Parameters");
-			ini.Write("FastLZMA2", "-m0=FLZMA2 -mx=9 -myx=9 -md=1024m -mfb=273 -mmt=32 -mmtf -mlc=4", "Parameters");
+			ini.write("PPMd", "-m0=PPMd -mx=9 -myx=9 -mmem=1024m -mo=32 -mmt=1", "Parameters");
+			ini.write("LZMA2", "-m0=LZMA2 -mx=9 -myx=9 -md=256m -mfb=273 -mmt=8 -mmtf -mmf=bt4 -mmc=10000 -mlc=4", "Parameters");
+			ini.write("Copy", "-m0=Copy -mx=0", "Parameters");
+			ini.write("x86", "-mf=BCJ2 -m0=LZMA2 -mx=9 -myx=9 -md=1024m -mfb=273 -mmt=8 -mmtf -mmf=bt4 -mmc=10000 -mlc=4", "Parameters");
+			ini.write("FastLZMA2", "-m0=FLZMA2 -mx=9 -myx=9 -md=1024m -mfb=273 -mmt=32 -mmtf -mlc=4", "Parameters");
 
-			ini.Write("IncludeRootDirectory", "0", "Misc");
+			ini.write("IncludeRootDirectory", "0", "Misc");
 		}
 	}
 }
