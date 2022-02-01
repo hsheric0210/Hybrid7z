@@ -5,9 +5,24 @@
     <TargetFramework>net6.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <FileVersion>0.0.0.1</FileVersion>
+    <FileVersion>0.0.1.1</FileVersion>
     <ApplicationIcon>7zip.ico</ApplicationIcon>
-    <Description>Hybrid 7-zip compressor</Description>
+    <Description>Hybrid7z - Apply different compression algorithms for each file (determinated by user-defined filter)</Description>
+    <StartupObject>Hybrid7z.Hybrid7z</StartupObject>
+    <AnalysisLevel>6.0</AnalysisLevel>
+    <Company></Company>
+    <PackageProjectUrl>https://github.com/hsheric0210/Hybrid7z</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/hsheric0210/Hybrid7z</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <NeutralLanguage>en-US</NeutralLanguage>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <Optimize>True</Optimize>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <Optimize>True</Optimize>
   </PropertyGroup>
 
   <ItemGroup>
