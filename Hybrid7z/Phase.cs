@@ -64,7 +64,9 @@ namespace Hybrid7z
 						if (!string.IsNullOrWhiteSpace(commentRemoved))
 						{
 							// Console.WriteLine($"[RFL] Readed from {filelistPath}: \"{commentRemoved}\"");
-							validElements.Add(commentRemoved.Trim());
+							var trimmed = commentRemoved.Trim();
+							Utils.trimLeadingPathSeparators(ref trimmed);
+							validElements.Add(trimmed);
 						}
 					}
 					filterElements = validElements.ToArray();
@@ -88,24 +90,21 @@ namespace Hybrid7z
 
 			var newFilterElements = new List<string>();
 			var tasks = new List<Task>();
-			foreach (string? filter in filterElements)
-				tasks.Add(Task.Run(() =>
+			Parallel.ForEach(filterElements, filter =>
+			{
+				try
 				{
-					try
+					if ((!filter.Contains('\\') || Directory.Exists(path + '\\' + Utils.extractSuperDirectoryName(filter))) && Directory.EnumerateFiles(path, filter, SearchOption.AllDirectories).Any())
 					{
-						if ((!filter.Contains('\\') || !filter.StartsWith('\\') && Directory.Exists(path + '\\' + Utils.extractSuperDirectoryName(filter))) && Directory.EnumerateFiles(path, filter, SearchOption.AllDirectories).Any())
-						{
-							Console.WriteLine($"[RbFL] Found files for filter \"{filter}\"");
-							newFilterElements.Add((includeRoot ? targetDirectoryName + "\\" : "") + filter);
-						}
+						Console.WriteLine($"[RbFL] Found files for filter \"{filter}\"");
+						newFilterElements.Add((includeRoot ? targetDirectoryName + "\\" : "") + filter);
 					}
-					catch (Exception ex)
-					{
-						Console.WriteLine($"[RbFL] Error re-building file list: {ex}");
-					}
-				}));
-
-			Task.WhenAll(tasks.ToArray()).Wait();
+				}
+				catch (Exception ex)
+				{
+					Console.WriteLine($"[RbFL] Error re-building file list: {ex}");
+				}
+			});
 
 			string? fileListPath = null;
 

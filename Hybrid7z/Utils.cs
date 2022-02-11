@@ -39,8 +39,14 @@ namespace Hybrid7z
 
 		public static void trimTrailingPathSeparators(ref string path)
 		{
-			while (path.EndsWith("\\"))
-				path = path[(path.LastIndexOf('\\') + 1)..];
+			while (path.EndsWith('\\'))
+				path = path[0..^1]; // Drop last char
+		}
+
+		public static void trimLeadingPathSeparators(ref string path)
+		{
+			while (path.StartsWith('\\'))
+				path = path[1..]; // Drop first char
 		}
 
 		public static string get7ZipExitCodeInformation(int exitCode) => exitCode switch
