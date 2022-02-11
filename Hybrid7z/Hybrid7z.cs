@@ -17,6 +17,7 @@ namespace Hybrid7z
 		// *** KEY: Phase name
 		// *** VALUE: Path of re-builded file list
 		public ConcurrentDictionary<string, Dictionary<string, string>> rebuildedFileLists = new();
+		public HashSet<string> terminalPhaseInclusion = new();
 
 		public static void Main(string[] args)
 		{
@@ -73,6 +74,15 @@ namespace Hybrid7z
 
 		private void rebuildFileLists(IEnumerable<string> targets)
 		{
+			// KEY: target
+			// VALUE: Set of available files
+			Dictionary<string, HashSet<string>> availableFiles = new();
+
+			Parallel.ForEach(targets, target =>
+			{
+				availableFiles[target] = Directory.EnumerateFiles(target, "*", SearchOption.AllDirectories).ToHashSet();
+			});
+
 			foreach (Phase phase in phases)
 			{
 				string phaseName = phase.phaseName;
@@ -80,19 +90,29 @@ namespace Hybrid7z
 				{
 					string targetName = Utils.extractTargetName(target);
 					Console.WriteLine($"[RbFL] Re-building file list for [file=\"{targetName}\", phase={phaseName}]");
-					string? path = phase.rebuildFileList(target, $"{targetName}.");
+					
+					availableFiles.TryGetValue(target, out HashSet<string>? availableFilesForThisTarget);
+					
+					// This will remove all paths(files) matching the specified filter from availableFilesForThisTarget.
+					string? path = phase.rebuildFileList(target, $"{targetName}.", ref availableFilesForThisTarget);
+
+					// We need to update availableFiles[target]
+					if (availableFilesForThisTarget != null)
+						availableFiles[target] = availableFilesForThisTarget;
 
 					// Fail-safe
 					if (!rebuildedFileLists.ContainsKey(targetName))
 						rebuildedFileLists.TryAdd(targetName, new());
 
 					if (rebuildedFileLists.TryGetValue(targetName, out Dictionary<string, string>? map) && path != null)
-					{
-						// Console.WriteLine($"[RbFL] Re-builded File list for [file=\"{targetName}\", phase={phaseName}] -> {path}");
 						map.Add(phaseName, path);
-					}
 				});
 			}
+
+			// TODO: Improve this ugly solution
+			foreach (string target in targets)
+				if (availableFiles.TryGetValue(target, out HashSet<string>? avail) && avail.Count > 0)
+					terminalPhaseInclusion.Add(target);
 		}
 
 		private bool processPhase(IEnumerable<string> targets)
@@ -306,95 +326,38 @@ namespace Hybrid7z
 			return error != 0;
 		}
 
-		//private bool RunParallelPhase2(Phase phase, IEnumerable<string> paths)
-		//{
-		//	string phaseName = phase.phaseName;
-		//	string prefix = $"PRL-{phaseName}"; //  'P' a 'R' a 'L' lel
-
-		//	bool includeRoot = config.IncludeRootDirectory;
-		//	bool errorDetected = false;
-
-		//	// System.Threading.Tasks.Parallel can't be used in here: Task-list empty check based logics, Console messages should be in ordered
-		//	var taskList = new List<Task>(paths.Count());
-
-		//	foreach (string? path in paths)
-		//	{
-		//		string currentTargetName = Utils.ExtractTargetName(path);
-		//		string archiveFileName = $"{(includeRoot ? "" : "..\\")}{currentTargetName}.7z";
-
-		//		if (rebuildedFileLists.TryGetValue(currentTargetName, out Dictionary<string, string>? fileListMap) && fileListMap.TryGetValue(phaseName, out string? fileListPath) && fileListPath != null)
-		//		{
-		//			Console.WriteLine($"<<==================== Starting Parallel-{phaseName} ====================>>");
-		//			Utils.PrintConsoleAndTitle($"[{prefix}] Start processing \"{path}\"");
-		//			Console.WriteLine();
-
-		//			Task? task = phase.PerformPhaseParallelAsync(path, $"-ir@\"{fileListPath}\" -- \"{archiveFileName}\"");
-
-		//			if (task != null)
-		//				taskList.Add(task);
-		//			else
-		//			{
-		//				errorDetected = true;
-		//				Utils.PrintError(prefix, $"Failed to perform parallel phase {phaseName} to \"{path}\"");
-		//			}
-
-		//			Console.WriteLine();
-		//			Utils.PrintConsoleAndTitle($"[{prefix}] Finished processing {path}");
-		//			Console.WriteLine($"<<==================== Finished Parallel-{phaseName} ====================>>");
-		//		}
-		//	}
-
-		//	if (taskList.Any())
-		//	{
-		//		Utils.PrintConsoleAndTitle($"[{prefix}] Waiting for all parallel compression processes are finished...");
-
-		//		int tick = Environment.TickCount;
-		//		var allTask = Task.WhenAll(taskList);
-
-		//		try
-		//		{
-		//			allTask.Wait();
-		//		}
-		//		catch (AggregateException ex)
-		//		{
-		//			Utils.PrintError(prefix, $"AggregateException occurred during parallel execution: {ex}");
-		//		}
-
-		//		Console.WriteLine($"[{prefix}] All parallel compression processes are finished! (Took {Environment.TickCount - tick}ms)");
-
-		//		return errorDetected || allTask.IsFaulted;
-		//	}
-
-		//	return errorDetected;
-		//}
-
-		private bool runSequentialPhases(IEnumerable<Phase> phases, string path, string titlePrefix)
+		private bool runSequentialPhases(IEnumerable<Phase> phases, string target, string titlePrefix)
 		{
 			bool includeRoot = config.IncludeRootDirectory;
-			string currentTargetName = path[(path.LastIndexOf('\\') + 1)..];
+			string currentTargetName = target[(target.LastIndexOf('\\') + 1)..];
 			string archiveFileName = $"{(includeRoot ? "" : "..\\")}{currentTargetName}.7z";
 
 			bool errorOccurred = false;
 
 			Console.WriteLine("<<=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= <*> =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=>>");
 
-			Utils.printConsoleAndTitle($"{titlePrefix} [SQN] Start processing \"{path}\"");
+			Utils.printConsoleAndTitle($"{titlePrefix} [SQN] Start processing \"{target}\"");
 
 			foreach (Phase? phase in phases)
 			{
 				if (phase.isTerminal)
 				{
-					string? list = "";
-					if (rebuildedFileLists.TryGetValue(currentTargetName, out Dictionary<string, string>? map))
-						list = string.Join(" ", map.Values.ToList().ConvertAll((from) => $"-xr@\"{from}\""));
-					errorOccurred = phase.performPhaseSequential(path, titlePrefix, $"-r {list} -- \"{archiveFileName}\" \"{(includeRoot ? currentTargetName : "*")}\"") || errorOccurred;
+					if (terminalPhaseInclusion.Contains(target))
+					{
+						string? list = "";
+						if (rebuildedFileLists.TryGetValue(currentTargetName, out Dictionary<string, string>? map))
+							list = string.Join(" ", map.Values.ToList().ConvertAll((from) => $"-xr@\"{from}\""));
+						errorOccurred = phase.performPhaseSequential(target, titlePrefix, $"-r {list} -- \"{archiveFileName}\" \"{(includeRoot ? currentTargetName : "*")}\"") || errorOccurred;
+					}
+					else
+						Console.WriteLine($"[SQN] Skipped Fast-LZMA2 phase for \"{target}\" because all files are already processed by previous phases");
 				}
 				else if (rebuildedFileLists.TryGetValue(currentTargetName, out Dictionary<string, string>? map) && map.TryGetValue(phase.phaseName, out string? fileListPath) && fileListPath != null)
-					errorOccurred = phase.performPhaseSequential(path, titlePrefix, $"-ir@\"{fileListPath}\" -- \"{archiveFileName}\"") || errorOccurred;
+					errorOccurred = phase.performPhaseSequential(target, titlePrefix, $"-ir@\"{fileListPath}\" -- \"{archiveFileName}\"") || errorOccurred;
 			}
 
 			Console.WriteLine();
-			Utils.printConsoleAndTitle($"{titlePrefix} [SQN] Finished processing {path}");
+			Utils.printConsoleAndTitle($"{titlePrefix} [SQN] Finished processing {target}");
 
 			Console.WriteLine("<<=-=-=-=-=-=-=-=-=-=-=-=-=-=-= <$> <~> =-=-=-=-=-=-=-=-=-=-=-=-=-=-=>>");
 

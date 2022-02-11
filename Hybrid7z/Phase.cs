@@ -80,7 +80,7 @@ namespace Hybrid7z
 				Console.WriteLine($"[RFL] Phase filter file not found for phase: {filelistPath}");
 		}
 
-		public string? rebuildFileList(string path, string fileNamePrefix)
+		public string? rebuildFileList(string path, string fileNamePrefix, ref HashSet<string>? availableFilesForThisTarget)
 		{
 			if (isTerminal || config == null || filterElements == null)
 				return null;
@@ -90,14 +90,24 @@ namespace Hybrid7z
 
 			var newFilterElements = new List<string>();
 			var tasks = new List<Task>();
+			HashSet<string>? availableFilesForThisTarget_ = availableFilesForThisTarget;
 			Parallel.ForEach(filterElements, filter =>
 			{
 				try
 				{
-					if ((!filter.Contains('\\') || Directory.Exists(path + '\\' + Utils.extractSuperDirectoryName(filter))) && Directory.EnumerateFiles(path, filter, SearchOption.AllDirectories).Any())
+					if ((!filter.Contains('\\') || Directory.Exists(path + '\\' + Utils.extractSuperDirectoryName(filter))))
 					{
-						Console.WriteLine($"[RbFL] Found files for filter \"{filter}\"");
-						newFilterElements.Add((includeRoot ? targetDirectoryName + "\\" : "") + filter);
+						var enumerated = Directory.EnumerateFiles(path, filter, SearchOption.AllDirectories);
+						if (enumerated.Any())
+						{
+							Console.WriteLine($"[RbFL] Found files for filter \"{filter}\"");
+							newFilterElements.Add((includeRoot ? targetDirectoryName + "\\" : "") + filter);
+
+							if (availableFilesForThisTarget_ != null)
+								lock (availableFilesForThisTarget_)
+									foreach (string enumeratedFile in enumerated)
+										availableFilesForThisTarget_.Remove(enumeratedFile); // Very inefficient solution; But, at least, hey, it's working solution!
+						}
 					}
 				}
 				catch (Exception ex)
@@ -286,47 +296,5 @@ namespace Hybrid7z
 			process.ErrorDataReceived += getBufferRedirectHandler(stderrBuffer, alsoConsole);
 			return (stdoutBuffer, stderrBuffer);
 		}
-
-		//public Task? PerformPhaseParallelAsync(string path, string extraParameters)
-		//{
-		//	if (config == null)
-		//		return null;
-
-		//	string currentTargetName = Utils.ExtractTargetName(path);
-
-		//	Console.WriteLine($">> ===== ----- {phaseName} Phase (Parallel) ----- ===== <<");
-		//	Utils.PrintConsoleAndTitle($"[PRL-{phaseName}] Queued \"{currentTargetName}\" - {phaseName} Phase");
-		//	Console.WriteLine();
-
-		//	Task? task = null;
-
-		//	try
-		//	{
-		//		Process sevenzip = new();
-		//		sevenzip.StartInfo.FileName = config.SevenZipExecutable;
-		//		sevenzip.StartInfo.WorkingDirectory = $"{(config.IncludeRootDirectory ? Utils.ExtractSuperDirectoryName(path) : path)}\\";
-		//		sevenzip.StartInfo.Arguments = $"{config.CommonArguments} {phaseParameter} {extraParameters}";
-		//		sevenzip.StartInfo.UseShellExecute = true;
-
-		//		sevenzip.Start();
-
-		//		task = sevenzip.WaitForExitAsync().ContinueWith((task) =>
-		//		{
-		//			int errorCode = sevenzip.ExitCode;
-		//			if (errorCode != 0)
-		//			{
-		//				Console.WriteLine();
-		//				Console.WriteLine($"[PRL-{phaseName}] 7z process exited with errors/warnings. Error code {errorCode} ({Utils.Get7ZipExitCodeInformation(errorCode)})");
-		//			}
-		//		});
-		//	}
-		//	catch (Exception ex)
-		//	{
-		//		Console.WriteLine();
-		//		Console.WriteLine($"[PRL-{phaseName}] Exception while executing 7z in parallel: {ex}");
-		//	}
-
-		//	return task;
-		//}
 	}
 }
