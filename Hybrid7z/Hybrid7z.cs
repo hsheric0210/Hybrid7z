@@ -76,7 +76,7 @@ namespace Hybrid7z
 		{
 			// KEY: target
 			// VALUE: Set of available files
-			Dictionary<string, HashSet<string>> availableFiles = new();
+			ConcurrentDictionary<string, HashSet<string>> availableFiles = new();
 
 			Parallel.ForEach(targets, target =>
 			{
