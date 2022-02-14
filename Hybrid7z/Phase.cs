@@ -80,7 +80,7 @@ namespace Hybrid7z
 				Console.WriteLine($"[RFL] Phase filter file not found for phase: {filelistPath}");
 		}
 
-		public string? rebuildFileList(string path, string fileNamePrefix, ref HashSet<string>? availableFilesForThisTarget)
+		public string? rebuildFileList(string path, string fileNamePrefix, EnumerationOptions recursiveEnumeratorOptions, ref HashSet<string>? availableFilesForThisTarget)
 		{
 			if (isTerminal || config == null || filterElements == null)
 				return null;
@@ -97,16 +97,16 @@ namespace Hybrid7z
 				{
 					if ((!filter.Contains('\\') || Directory.Exists(path + '\\' + Utils.extractSuperDirectoryName(filter))))
 					{
-						var enumerated = Directory.EnumerateFiles(path, filter, SearchOption.AllDirectories);
-						if (enumerated.Any())
+						IEnumerable<string> files = Directory.EnumerateFiles(path, filter, recursiveEnumeratorOptions);
+						if (files.Any())
 						{
 							Console.WriteLine($"[RbFL] Found files for filter \"{filter}\"");
 							newFilterElements.Add((includeRoot ? targetDirectoryName + "\\" : "") + filter);
 
 							if (availableFilesForThisTarget_ != null)
 								lock (availableFilesForThisTarget_)
-									foreach (string enumeratedFile in enumerated)
-										availableFilesForThisTarget_.Remove(enumeratedFile); // Very inefficient solution; But, at least, hey, it's working solution!
+									foreach (string filepath in files)
+										availableFilesForThisTarget_.Remove(filepath.ToUpperInvariant()); // Very inefficient solution; But, at least, hey, it iss working!
 						}
 					}
 				}

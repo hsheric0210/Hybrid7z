@@ -19,6 +19,12 @@ namespace Hybrid7z
 		public ConcurrentDictionary<string, Dictionary<string, string>> rebuildedFileLists = new();
 		public HashSet<string> terminalPhaseInclusion = new();
 
+		public EnumerationOptions recursiveEnumeratorOptions = new()
+		{
+			AttributesToSkip = 0,
+			RecurseSubdirectories = true
+		};
+
 		public static void Main(string[] args)
 		{
 			Console.WriteLine($"Hybrid7z v{VERSION}");
@@ -80,7 +86,7 @@ namespace Hybrid7z
 
 			Parallel.ForEach(targets, target =>
 			{
-				availableFiles[target] = Directory.EnumerateFiles(target, "*", SearchOption.AllDirectories).ToHashSet();
+				availableFiles[target] = Directory.EnumerateFiles(target, "*", recursiveEnumeratorOptions).Select(path => path.ToUpperInvariant()).ToHashSet();
 			});
 
 			foreach (Phase phase in phases)
@@ -90,21 +96,18 @@ namespace Hybrid7z
 				{
 					string targetName = Utils.extractTargetName(target);
 					Console.WriteLine($"[RbFL] Re-building file list for [file=\"{targetName}\", phase={phaseName}]");
-					
-					availableFiles.TryGetValue(target, out HashSet<string>? availableFilesForThisTarget);
+
+					HashSet<string>? availableFilesForCurrentTarget = availableFiles[target];
 					
 					// This will remove all paths(files) matching the specified filter from availableFilesForThisTarget.
-					string? path = phase.rebuildFileList(target, $"{targetName}.", ref availableFilesForThisTarget);
-
-					// We need to update availableFiles[target]
-					if (availableFilesForThisTarget != null)
-						availableFiles[target] = availableFilesForThisTarget;
+					string? path = phase.rebuildFileList(target, $"{targetName}.", recursiveEnumeratorOptions, ref availableFilesForCurrentTarget);
 
 					// Fail-safe
 					if (!rebuildedFileLists.ContainsKey(targetName))
-						rebuildedFileLists.TryAdd(targetName, new());
-
-					if (rebuildedFileLists.TryGetValue(targetName, out Dictionary<string, string>? map) && path != null)
+						rebuildedFileLists[targetName] = new();
+					
+					Dictionary<string, string> map = rebuildedFileLists[targetName];
+					if (path != null)
 						map.Add(phaseName, path);
 				});
 			}
@@ -139,6 +142,9 @@ namespace Hybrid7z
 				error = runSequentialPhases(sequentialPhases, target, titlePrefix) || error;
 				currentFileIndex++;
 			}
+
+			foreach (string? target in targets)
+				Utils.printCompressionRatio(target, recursiveEnumeratorOptions);
 
 			return error;
 		}
@@ -254,26 +260,26 @@ namespace Hybrid7z
 			Console.WriteLine($"[RbFL] Done rebuilding file lists (Took {Environment.TickCount - tick}ms)");
 			Console.WriteLine("[C] Now starting the compression...");
 
-			ConsoleColor prevColor = Console.BackgroundColor;
+			ConsoleColor prevColor = Console.ForegroundColor;
 
 			// Process phases
 			if (!targets.Any())
 			{
-				Console.BackgroundColor = ConsoleColor.DarkYellow;
+				Console.ForegroundColor = ConsoleColor.DarkYellow;
 				Console.WriteLine("[C] No target supplied.");
-				Console.BackgroundColor = prevColor;
+				Console.ForegroundColor = prevColor;
 			}
 			else if (processPhase(targets))
 			{
-				Console.BackgroundColor = ConsoleColor.DarkRed;
+				Console.ForegroundColor = ConsoleColor.Red;
 				Console.WriteLine("[C] At least one error/warning occurred during the progress.");
-				Console.BackgroundColor = prevColor;
+				Console.ForegroundColor = prevColor;
 			}
 			else
 			{
-				Console.BackgroundColor = ConsoleColor.DarkBlue;
+				Console.ForegroundColor = ConsoleColor.Blue;
 				Console.WriteLine("[C] All files are successfully proceed without any error(s).");
-				Console.BackgroundColor = prevColor;
+				Console.ForegroundColor = prevColor;
 			}
 			Console.WriteLine("[DFL] Press any key to delete leftover filelists and exit program...");
 
@@ -322,14 +328,13 @@ namespace Hybrid7z
 			else
 				Utils.printConsoleAndTitle($"[{prefix}] Successfully finished phase {phaseName} without any errors.");
 			Console.WriteLine($"<<==================== Finished Parallel-{phaseName} ====================>>");
-
 			return error != 0;
 		}
 
 		private bool runSequentialPhases(IEnumerable<Phase> phases, string target, string titlePrefix)
 		{
 			bool includeRoot = config.IncludeRootDirectory;
-			string currentTargetName = target[(target.LastIndexOf('\\') + 1)..];
+			string currentTargetName = Utils.extractTargetName(target);
 			string archiveFileName = $"{(includeRoot ? "" : "..\\")}{currentTargetName}.7z";
 
 			bool errorOccurred = false;
@@ -338,7 +343,7 @@ namespace Hybrid7z
 
 			Utils.printConsoleAndTitle($"{titlePrefix} [SQN] Start processing \"{target}\"");
 
-			foreach (Phase? phase in phases)
+			foreach (Phase phase in phases)
 			{
 				if (phase.isTerminal)
 				{
@@ -350,13 +355,19 @@ namespace Hybrid7z
 						errorOccurred = phase.performPhaseSequential(target, titlePrefix, $"-r {list} -- \"{archiveFileName}\" \"{(includeRoot ? currentTargetName : "*")}\"") || errorOccurred;
 					}
 					else
-						Console.WriteLine($"[SQN] Skipped Fast-LZMA2 phase for \"{target}\" because all files are already processed by previous phases");
+					{
+						ConsoleColor prevColor = Console.ForegroundColor;
+						Console.ForegroundColor = ConsoleColor.Cyan;
+						Console.WriteLine($"[SQN] Skipped terminal phase({phase.phaseName}) for \"{target}\" because all files are already processed by previous phases");
+						Console.ForegroundColor = prevColor;
+					}
 				}
 				else if (rebuildedFileLists.TryGetValue(currentTargetName, out Dictionary<string, string>? map) && map.TryGetValue(phase.phaseName, out string? fileListPath) && fileListPath != null)
 					errorOccurred = phase.performPhaseSequential(target, titlePrefix, $"-ir@\"{fileListPath}\" -- \"{archiveFileName}\"") || errorOccurred;
 			}
 
 			Console.WriteLine();
+			Utils.printCompressionRatio(target, recursiveEnumeratorOptions, currentTargetName);
 			Utils.printConsoleAndTitle($"{titlePrefix} [SQN] Finished processing {target}");
 
 			Console.WriteLine("<<=-=-=-=-=-=-=-=-=-=-=-=-=-=-= <$> <~> =-=-=-=-=-=-=-=-=-=-=-=-=-=-=>>");

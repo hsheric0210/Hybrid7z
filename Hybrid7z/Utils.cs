@@ -4,30 +4,52 @@ namespace Hybrid7z
 {
 	public static class Utils
 	{
-		private static readonly ConcurrentDictionary<string, string> TargetNameCache = new();
-		private static readonly ConcurrentDictionary<string, string> SuperNameCache = new();
+		private static readonly ConcurrentDictionary<string, string> targetNameCache = new();
+		private static readonly ConcurrentDictionary<string, string> superNameCache = new();
+		private static readonly Dictionary<string, long> originalFilesSizeCache = new();
+		private static readonly Dictionary<string, long> archiveFileSizeCache = new();
+
+
+		public static void printCompressionRatio(string target, EnumerationOptions recursiveEnumeratorOptions, string? targetSimpleName = null)
+		{
+			trimTrailingPathSeparators(ref target);
+
+			if (!originalFilesSizeCache.TryGetValue(target, out var originalSize))
+			{
+				originalSize = new DirectoryInfo(target).GetFiles("*", recursiveEnumeratorOptions).Sum(f => f.Length);
+				originalFilesSizeCache[target] = originalSize;
+			}
+
+			if (!archiveFileSizeCache.TryGetValue(target, out var compressedSize))
+			{
+				compressedSize = new FileInfo($"{target}.7z").Length;
+				archiveFileSizeCache[target] = compressedSize;
+			}
+
+			Console.WriteLine($"Compression Ratio: \"{targetSimpleName ?? Utils.extractTargetName(target)}\" is {(originalSize > 0 ? (compressedSize * 100 / originalSize) : 0)}% compressed ({originalSize} -> {compressedSize} bytes)");
+		}
 
 		public static string extractTargetName(string path)
 		{
-			if (TargetNameCache.TryGetValue(path, out string? targetName))
+			if (targetNameCache.TryGetValue(path, out string? targetName))
 				return targetName;
 
 			trimTrailingPathSeparators(ref path);
 
 			targetName = path[(path.LastIndexOf('\\') + 1)..];
-			TargetNameCache.TryAdd(path, targetName);
+			targetNameCache.TryAdd(path, targetName);
 			return targetName;
 		}
 
 		public static string extractSuperDirectoryName(string path)
 		{
-			if (SuperNameCache.TryGetValue(path, out string? superName))
+			if (superNameCache.TryGetValue(path, out string? superName))
 				return superName;
 
 			trimTrailingPathSeparators(ref path);
 
 			superName = path[..(path.LastIndexOf('\\') + 1)];
-			SuperNameCache.TryAdd(path, superName);
+			superNameCache.TryAdd(path, superName);
 			return superName;
 		}
 
@@ -69,13 +91,13 @@ namespace Hybrid7z
 
 		public static void printError(string prefix, string details)
 		{
-			ConsoleColor prevColor = Console.BackgroundColor;
-			Console.BackgroundColor = ConsoleColor.DarkRed;
+			ConsoleColor prevColor = Console.ForegroundColor;
+			Console.ForegroundColor = ConsoleColor.Red;
 			printConsoleAndTitle($"[{prefix}] {details}");
 			Console.WriteLine();
 			Console.WriteLine($"[{prefix}] Check the error details and press any key to continue process...");
 			pause();
-			Console.BackgroundColor = prevColor;
+			Console.ForegroundColor = prevColor;
 		}
 	}
 }
