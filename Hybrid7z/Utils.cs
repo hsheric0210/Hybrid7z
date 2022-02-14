@@ -83,10 +83,10 @@ namespace Hybrid7z
 
 		public static void pause()
 		{
-			ConsoleKeyInfo ci;
+			string? line;
 			do
-				ci = Console.ReadKey();
-			while (ci.Modifiers != 0);
+				line = Console.ReadLine();
+			while ((line?.Length ?? 0) <= 0);
 		}
 
 		public static void printError(string prefix, string details)
@@ -95,7 +95,7 @@ namespace Hybrid7z
 			Console.ForegroundColor = ConsoleColor.Red;
 			printConsoleAndTitle($"[{prefix}] {details}");
 			Console.WriteLine();
-			Console.WriteLine($"[{prefix}] Check the error details and press any key to continue process...");
+			Console.WriteLine($"[{prefix}] Check the error details and press any key and enter to continue process...");
 			pause();
 			Console.ForegroundColor = prevColor;
 		}

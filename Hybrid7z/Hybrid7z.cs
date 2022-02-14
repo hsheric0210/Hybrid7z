@@ -281,7 +281,7 @@ namespace Hybrid7z
 				Console.WriteLine("[C] All files are successfully proceed without any error(s).");
 				Console.ForegroundColor = prevColor;
 			}
-			Console.WriteLine("[DFL] Press any key to delete leftover filelists and exit program...");
+			Console.WriteLine("[DFL] Press any key and enter to delete leftover filelists...");
 
 			// Wait until any key has been pressed
 			Utils.pause();
@@ -294,6 +294,11 @@ namespace Hybrid7z
 						File.Delete(file);
 						Console.WriteLine($"[DFL] Deleted (re-builded) file list \"{file}\"");
 					}
+
+			Console.WriteLine("Press any key and enter to exit program...");
+
+			// Wait until any key has been pressed
+			Utils.pause();
 		}
 
 		private bool runParallelPhase(Phase phase, IEnumerable<string> paths)
