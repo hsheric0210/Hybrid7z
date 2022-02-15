@@ -10,7 +10,7 @@ namespace Hybrid7z
 		private static readonly Dictionary<string, long> archiveFileSizeCache = new();
 
 
-		public static void printCompressionRatio(string target, EnumerationOptions recursiveEnumeratorOptions, string? targetSimpleName = null)
+		public static (long, long) getCompressionRatio(string target, EnumerationOptions recursiveEnumeratorOptions, string? targetSimpleName = null)
 		{
 			trimTrailingPathSeparators(ref target);
 
@@ -26,7 +26,14 @@ namespace Hybrid7z
 				archiveFileSizeCache[target] = compressedSize;
 			}
 
-			Console.WriteLine($"Compression Ratio: \"{targetSimpleName ?? Utils.extractTargetName(target)}\" is {(originalSize > 0 ? (compressedSize * 100 / originalSize) : 0)}% compressed ({originalSize} -> {compressedSize} bytes)");
+			printCompressionRatio($"{targetSimpleName ?? Utils.extractTargetName(target)} is", originalSize, compressedSize);
+
+			return (originalSize, compressedSize);
+		}
+
+		public static void printCompressionRatio(string name, long originalSize, long compressedSize)
+		{
+			Console.WriteLine($"Compression Ratio: {name} {(originalSize > 0 ? (compressedSize * 100 / originalSize) : 0)}% compressed ({originalSize} -> {compressedSize} bytes)");
 		}
 
 		public static string extractTargetName(string path)

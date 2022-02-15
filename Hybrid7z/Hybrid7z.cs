@@ -98,14 +98,14 @@ namespace Hybrid7z
 					Console.WriteLine($"[RbFL] Re-building file list for [file=\"{targetName}\", phase={phaseName}]");
 
 					HashSet<string>? availableFilesForCurrentTarget = availableFiles[target];
-					
+
 					// This will remove all paths(files) matching the specified filter from availableFilesForThisTarget.
 					string? path = phase.rebuildFileList(target, $"{targetName}.", recursiveEnumeratorOptions, ref availableFilesForCurrentTarget);
 
 					// Fail-safe
 					if (!rebuildedFileLists.ContainsKey(targetName))
 						rebuildedFileLists[targetName] = new();
-					
+
 					Dictionary<string, string> map = rebuildedFileLists[targetName];
 					if (path != null)
 						map.Add(phaseName, path);
@@ -143,8 +143,16 @@ namespace Hybrid7z
 				currentFileIndex++;
 			}
 
+			long original = 0;
+			long compressed = 0;
 			foreach (string? target in targets)
-				Utils.printCompressionRatio(target, recursiveEnumeratorOptions);
+			{
+				(long original, long compressed) currentRatio = Utils.getCompressionRatio(target, recursiveEnumeratorOptions);
+				original += currentRatio.original;
+				compressed += currentRatio.compressed;
+			}
+
+			Utils.printCompressionRatio("(Overall)", original, compressed);
 
 			return error;
 		}
@@ -372,7 +380,7 @@ namespace Hybrid7z
 			}
 
 			Console.WriteLine();
-			Utils.printCompressionRatio(target, recursiveEnumeratorOptions, currentTargetName);
+			Utils.getCompressionRatio(target, recursiveEnumeratorOptions, currentTargetName);
 			Utils.printConsoleAndTitle($"{titlePrefix} [SQN] Finished processing {target}");
 
 			Console.WriteLine("<<=-=-=-=-=-=-=-=-=-=-=-=-=-=-= <$> <~> =-=-=-=-=-=-=-=-=-=-=-=-=-=-=>>");
