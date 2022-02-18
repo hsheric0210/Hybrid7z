@@ -35,7 +35,21 @@ namespace Hybrid7z
 		public static void printCompressionRatio(string name, long originalSize, long compressedSize)
 		{
 			Console.WriteLine($"{name} {sizeSuffix(originalSize)} -> {sizeSuffix(compressedSize)} ({(originalSize > 0 ? (compressedSize * 100 / originalSize) : 0)}% compressed)");
-			Console.WriteLine($"{name} Saved(Economized) {sizeSuffix(originalSize - compressedSize)}");
+
+			ConsoleColor prevColor = Console.ForegroundColor;
+			if (originalSize > compressedSize)
+			{
+				Console.ForegroundColor = ConsoleColor.Blue;
+				Console.WriteLine($"{name} Saved {sizeSuffix(originalSize - compressedSize)}");
+			}
+			else
+			{
+				Console.ForegroundColor = ConsoleColor.Yellow;
+				Console.WriteLine($"{name} Wasted {sizeSuffix(compressedSize - originalSize)}");
+			}
+
+			Console.ForegroundColor = prevColor;
+
 		}
 
 		public static string extractTargetName(string path)
@@ -138,7 +152,7 @@ namespace Hybrid7z
 
 			int mag = (int)Math.Log(value, _base);
 
-			decimal adjustedSize = (decimal)value / (_base == 1024 ? (1L << (mag * 10)) : _base * mag);
+			decimal adjustedSize = (decimal)value / (_base == 1024 ? (1L << (mag * 10)) : (int)Math.Pow(_base, mag));
 
 			if (Math.Round(adjustedSize, decimalPlaces) >= 1000)
 			{
