@@ -8,7 +8,7 @@ namespace Hybrid7z
 		private static readonly ConcurrentDictionary<string, string> superNameCache = new();
 		private static readonly Dictionary<string, long> originalFilesSizeCache = new();
 		private static readonly Dictionary<string, long> archiveFileSizeCache = new();
-
+		private static readonly Dictionary<(long, int), string> sizeSuffixCache = new();
 
 		public static (long, long) getCompressionRatio(string target, EnumerationOptions recursiveEnumeratorOptions, string? targetSimpleName = null)
 		{
@@ -22,18 +22,20 @@ namespace Hybrid7z
 
 			if (!archiveFileSizeCache.TryGetValue(target, out var compressedSize))
 			{
-				compressedSize = new FileInfo($"{target}.7z").Length;
+				var file = new FileInfo($"{target}.7z");
+				compressedSize = file.Exists ? file.Length : 0;
 				archiveFileSizeCache[target] = compressedSize;
 			}
 
-			printCompressionRatio($"{targetSimpleName ?? Utils.extractTargetName(target)} is", originalSize, compressedSize);
+			printCompressionRatio($"\"{targetSimpleName ?? Utils.extractTargetName(target)}\":", originalSize, compressedSize);
 
 			return (originalSize, compressedSize);
 		}
 
 		public static void printCompressionRatio(string name, long originalSize, long compressedSize)
 		{
-			Console.WriteLine($"Compression Ratio: {name} {(originalSize > 0 ? (compressedSize * 100 / originalSize) : 0)}% compressed ({originalSize} -> {compressedSize} bytes)");
+			Console.WriteLine($"{name} {sizeSuffix(originalSize)} -> {sizeSuffix(compressedSize)} ({(originalSize > 0 ? (compressedSize * 100 / originalSize) : 0)}% compressed)");
+			Console.WriteLine($"{name} Saved(Economized) {sizeSuffix(originalSize - compressedSize)}");
 		}
 
 		public static string extractTargetName(string path)
@@ -105,6 +107,46 @@ namespace Hybrid7z
 			Console.WriteLine($"[{prefix}] Check the error details and press any key and enter to continue process...");
 			pause();
 			Console.ForegroundColor = prevColor;
+		}
+
+		// https://stackoverflow.com/questions/14488796/does-net-provide-an-easy-way-convert-bytes-to-kb-mb-gb-etc
+
+		private static readonly string[] SizeSuffixes = { "bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB" };
+		private static readonly string[] SizeSuffixesBinary = { "bytes", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB" };
+
+		public static string sizeSuffix(long value, int decimalPlaces = 1)
+		{
+			if (!sizeSuffixCache.TryGetValue((value, decimalPlaces), out string? result))
+			{
+				result = $"({sizeSuffixInternal(value, decimalPlaces, SizeSuffixes, 1000)} / {sizeSuffixInternal(value, decimalPlaces, SizeSuffixesBinary, 1024)})";
+				sizeSuffixCache[(value, decimalPlaces)] = result;
+			}
+
+			return result;
+		}
+
+		private static string sizeSuffixInternal(long value, int decimalPlaces, string[] suffixes, int _base)
+		{
+			if (decimalPlaces < 0)
+				throw new ArgumentOutOfRangeException(nameof(decimalPlaces));
+
+			if (value < 0)
+				return "-" + sizeSuffixInternal(-value, decimalPlaces, suffixes, _base);
+
+			if (value == 0)
+				return string.Format("{0:n" + decimalPlaces + "} bytes", 0);
+
+			int mag = (int)Math.Log(value, _base);
+
+			decimal adjustedSize = (decimal)value / (_base == 1024 ? (1L << (mag * 10)) : _base * mag);
+
+			if (Math.Round(adjustedSize, decimalPlaces) >= 1000)
+			{
+				mag += 1;
+				adjustedSize /= _base;
+			}
+
+			return string.Format("{0:n" + decimalPlaces + "} {1}", adjustedSize, suffixes[mag]);
 		}
 	}
 }
