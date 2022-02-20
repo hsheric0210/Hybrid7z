@@ -233,9 +233,9 @@ namespace Hybrid7z
 				phases = new Phase[5];
 				phases[0] = new Phase("PPMd", false, true);
 				phases[1] = new Phase("Copy", false, true);
-				phases[3] = new Phase("LZMA2", false, false);
-				phases[4] = new Phase("x86", false, false);
-				phases[2] = new Phase("Brotli", false, false);
+				phases[2] = new Phase("LZMA2", false, false);
+				phases[3] = new Phase("x86", false, false);
+				phases[4] = new Phase("Brotli", false, false);
 				phases[5] = new Phase("FastLZMA2", true, false);
 			}
 			catch (Exception ex)
