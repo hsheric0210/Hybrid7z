@@ -230,13 +230,17 @@ namespace Hybrid7z
 			try
 			{
 				// Construct phases
-				phases = new Phase[5];
-				phases[0] = new Phase("PPMd", false, true);
-				phases[1] = new Phase("Copy", false, true);
-				phases[2] = new Phase("LZMA2", false, false);
-				phases[3] = new Phase("x86", false, false);
-				phases[4] = new Phase("Brotli", false, false);
-				phases[5] = new Phase("FastLZMA2", true, false);
+				string[] phaseNames = config.phases;
+				int count = phaseNames.Length;
+				phases = new Phase[count];
+				for (int i = 0; i < count; i++)
+				{
+					string phaseName = phaseNames[i][1..];
+					bool terminal = i >= count - 1;
+					bool runParallel = char.ToLower(phaseNames[i][0]) == 'y';
+					phases[i] = new Phase(phaseName, terminal, runParallel);
+					Console.WriteLine($"[P] Phase[{i}] = \"{phaseName}\" (terminal={terminal}, parallel={runParallel})");
+				}
 			}
 			catch (Exception ex)
 			{
