@@ -145,7 +145,7 @@ namespace Hybrid7z
 			try
 			{
 				Process sevenzip = new();
-				sevenzip.StartInfo.FileName = config.SevenZipExecutable;
+				sevenzip.StartInfo.FileName = config.get7zExecutable(phaseName);
 				sevenzip.StartInfo.WorkingDirectory = $"{(config.IncludeRootDirectory ? Utils.extractSuperDirectoryName(path) : path)}\\";
 				sevenzip.StartInfo.Arguments = $"{config.CommonArguments} {phaseParameter} {extraParameters}";
 				sevenzip.StartInfo.UseShellExecute = false;
@@ -205,7 +205,7 @@ namespace Hybrid7z
 			try
 			{
 				Process sevenzip = new();
-				sevenzip.StartInfo.FileName = config.SevenZipExecutable;
+				sevenzip.StartInfo.FileName = config.get7zExecutable(phaseName);
 				sevenzip.StartInfo.WorkingDirectory = $"{(config.IncludeRootDirectory ? Utils.extractSuperDirectoryName(path) : path)}\\";
 				sevenzip.StartInfo.Arguments = $"{config.CommonArguments} {phaseParameter} {extraParameters}";
 				sevenzip.StartInfo.UseShellExecute = false;

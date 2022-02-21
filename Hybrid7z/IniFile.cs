@@ -38,6 +38,14 @@ namespace Hybrid7z
 
 		public void deleteSection(string? Section = null) => write(null, null, Section ?? EXE);
 
-		public bool keyExists(string Key, string? Section = null) => read(Key, Section).Length > 0;
+		public bool keyExists(string Key, string? Section = null)
+		{
+			var RetVal = new StringBuilder(255);
+			GetPrivateProfileString(Section ?? EXE, Key, "", RetVal, 255, Path);
+			int lastError = GetLastError();
+			if (lastError != 0)
+				return false;
+			return RetVal.ToString().Trim().Length > 0;
+		}
 	}
 }

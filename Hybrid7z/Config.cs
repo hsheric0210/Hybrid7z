@@ -6,9 +6,10 @@ namespace Hybrid7z
 	{
 		private readonly IniFile config;
 
-		public string SevenZipExecutable;
+		public string default7zExecutable;
 		public string CommonArguments;
 		public string[] phases;
+		public Dictionary<string, string> sevenzipExecutables = new();
 
 		public bool IncludeRootDirectory;
 
@@ -16,7 +17,7 @@ namespace Hybrid7z
 		{
 			this.config = config;
 
-			SevenZipExecutable = config.read("Executable", "7z");
+			default7zExecutable = config.read("Executable", "7z");
 			CommonArguments = config.read("BaseParameters", "7z");
 			phases = config.read("Phases", "7z").Split('-');
 
@@ -24,7 +25,20 @@ namespace Hybrid7z
 			IncludeRootDirectory = !string.Equals(includeRootStr, "0") && !string.Equals(includeRootStr, "false", StringComparison.InvariantCultureIgnoreCase) && !string.Equals(includeRootStr, "no", StringComparison.InvariantCultureIgnoreCase);
 		}
 
-		public string getPhaseSpecificParameters(string phaseName) => config.read($"{phaseName}", "Parameters");
+		public string get7zExecutable(string phaseName)
+		{
+			if (sevenzipExecutables.TryGetValue(phaseName, out var exe))
+				return exe;
+
+			if (config.keyExists(phaseName, "7zExecutable"))
+				exe = config.read(phaseName, "7zExecutable");
+			else 
+				exe = default7zExecutable;
+			sevenzipExecutables[phaseName] = exe;
+			return exe;
+		}
+
+		public string getPhaseSpecificParameters(string phaseName) => config.read(phaseName, "Parameters");
 
 		public static void saveDefaults(string path)
 		{
@@ -36,7 +50,7 @@ namespace Hybrid7z
 			builder.AppendLine("Executable=7z.exe");
 			
 			builder.AppendLine("; Common 7-Zip command-line parameters that affects on all phases");
-			builder.AppendLine("BaseParameters=a -t7z -mhe -ms=1g -mqs -slp -bt -bb3 -sae");
+			builder.AppendLine("BaseParameters=a -t7z -mhe -ms=1g -mqs -slp -bt -bb3 -bsp1 -sae");
 
 			builder.AppendLine("; List of phases");
 			builder.AppendLine("; Syntax: {Does the phase should run in parallel? (y or n)}{Phase name}");
@@ -45,6 +59,7 @@ namespace Hybrid7z
 			builder.AppendLine("Phases=yPPMd-yCopy-nLZMA2-nx86-nBrotli-nFastLZMA2");
 
 			builder.AppendLine();
+			builder.AppendLine("; You can specify 7z arguments for each phases");
 			builder.AppendLine("[Parameters]");
 
 			builder.AppendLine("; 7-Zip command-line parameters use on PPMd phase");
@@ -64,6 +79,14 @@ namespace Hybrid7z
 
 			builder.AppendLine("; 7-Zip command-line parameters use on FastLZMA2 phase");
 			builder.AppendLine("FastLZMA2=-m0=FLZMA2 -mx=9 -myx=9 -md=1024m -mfb=273 -mmt=16 -mmtf=on -mlc=4");
+
+			builder.AppendLine();
+			builder.AppendLine("; You can specify different 7z executable for each phases");
+			builder.AppendLine("; For example, you can specify 7zG.exe instead of 7z.exe to provide GUI version of 7z to display the progress bar more simply.");
+			builder.AppendLine("[7zExecutable]");
+
+			builder.AppendLine("; LZMA2=7zG.exe");
+			builder.AppendLine("; Brotli=7zG.exe");
 
 			builder.AppendLine();
 			builder.AppendLine("[Misc]");
