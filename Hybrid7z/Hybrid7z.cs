@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Text;
 
 namespace Hybrid7z
 {
@@ -124,12 +125,16 @@ namespace Hybrid7z
 
 			// Create log file repository
 			if (targets.Any())
-				Directory.CreateDirectory(currentExecutablePath + "logs");
+				Directory.CreateDirectory($"{currentExecutablePath}logs");
+
+			string extraParameters = "";
+			if (File.Exists("Exclude.txt"))
+				extraParameters = $"-xr@\"{currentExecutablePath}Exclude.txt\"";
 
 			var sequentialPhases = new List<Phase>();
 			foreach (Phase? phase in phases)
 				if (phase.doesntSupportMultiThread)
-					error = runParallelPhase(phase, targets) || error;
+					error = runParallelPhase(phase, targets, extraParameters) || error;
 				else
 					sequentialPhases.Add(phase);
 
@@ -139,7 +144,7 @@ namespace Hybrid7z
 			foreach (string? target in targets)
 			{
 				string titlePrefix = $"[{currentFileIndex}/{totalTargetCount}]";
-				error = runSequentialPhases(sequentialPhases, target, titlePrefix) || error;
+				error = runSequentialPhases(sequentialPhases, target, titlePrefix, extraParameters) || error;
 				currentFileIndex++;
 			}
 
@@ -314,7 +319,7 @@ namespace Hybrid7z
 			Utils.pause();
 		}
 
-		private bool runParallelPhase(Phase phase, IEnumerable<string> paths)
+		private bool runParallelPhase(Phase phase, IEnumerable<string> paths, string extraParameters)
 		{
 			string phaseName = phase.phaseName;
 			string prefix = $"PRL-{phaseName}"; //  'P' a 'R' a 'L' lel
@@ -331,7 +336,7 @@ namespace Hybrid7z
 				Parallel.ForEach(paths, path =>
 				{
 					string currentTargetName = Utils.extractTargetName(path);
-					if (rebuildedFileLists.TryGetValue(currentTargetName, out Dictionary<string, string>? fileListMap) && fileListMap.TryGetValue(phaseName, out string? fileListPath) && fileListPath != null && !phase.performPhaseParallel(path, $"-ir@\"{fileListPath}\" -- \"{$"{(includeRoot ? "" : "..\\")}{currentTargetName}.7z"}\""))
+					if (rebuildedFileLists.TryGetValue(currentTargetName, out Dictionary<string, string>? fileListMap) && fileListMap.TryGetValue(phaseName, out string? fileListPath) && fileListPath != null && !phase.performPhaseParallel(path, $"{extraParameters} -ir@\"{fileListPath}\" -- \"{$"{(includeRoot ? "" : "..\\")}{currentTargetName}.7z"}\""))
 						Interlocked.CompareExchange(ref error, 1, 0);
 				});
 			}
@@ -349,7 +354,7 @@ namespace Hybrid7z
 			return error != 0;
 		}
 
-		private bool runSequentialPhases(IEnumerable<Phase> phases, string target, string titlePrefix)
+		private bool runSequentialPhases(IEnumerable<Phase> phases, string target, string titlePrefix, string extraParameters)
 		{
 			bool includeRoot = config.IncludeRootDirectory;
 			string currentTargetName = Utils.extractTargetName(target);
@@ -370,7 +375,7 @@ namespace Hybrid7z
 						string? list = "";
 						if (rebuildedFileLists.TryGetValue(currentTargetName, out Dictionary<string, string>? map))
 							list = string.Join(" ", map.Values.ToList().ConvertAll((from) => $"-xr@\"{from}\""));
-						errorOccurred = phase.performPhaseSequential(target, titlePrefix, $"-r {list} -- \"{archiveFileName}\" \"{(includeRoot ? currentTargetName : "*")}\"") || errorOccurred;
+						errorOccurred = phase.performPhaseSequential(target, titlePrefix, $"{extraParameters} -r {list} -- \"{archiveFileName}\" \"{(includeRoot ? currentTargetName : "*")}\"") || errorOccurred;
 					}
 					else
 					{
@@ -381,7 +386,7 @@ namespace Hybrid7z
 					}
 				}
 				else if (rebuildedFileLists.TryGetValue(currentTargetName, out Dictionary<string, string>? map) && map.TryGetValue(phase.phaseName, out string? fileListPath) && fileListPath != null)
-					errorOccurred = phase.performPhaseSequential(target, titlePrefix, $"-ir@\"{fileListPath}\" -- \"{archiveFileName}\"") || errorOccurred;
+					errorOccurred = phase.performPhaseSequential(target, titlePrefix, $"{extraParameters} -ir@\"{fileListPath}\" -- \"{archiveFileName}\"") || errorOccurred;
 			}
 
 			Console.WriteLine();

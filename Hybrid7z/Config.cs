@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Collections.Concurrent;
+using System.Text;
 
 namespace Hybrid7z
 {
@@ -9,7 +10,7 @@ namespace Hybrid7z
 		public string default7zExecutable;
 		public string CommonArguments;
 		public string[] phases;
-		public Dictionary<string, string> sevenzipExecutables = new();
+		public ConcurrentDictionary<string, string> sevenzipExecutables = new();
 
 		public bool IncludeRootDirectory;
 
