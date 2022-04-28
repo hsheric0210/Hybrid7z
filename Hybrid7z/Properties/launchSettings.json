@@ -2,7 +2,7 @@
   "profiles": {
     "Hybrid7z": {
       "commandName": "Project",
-      "commandLineArgs": "\"D:\\Repo\\Hybrid7z\\Hybrid7z\\bin\\Release\\net6.0\\a\" \"D:\\Repo\\Hybrid7z\\Hybrid7z\\bin\\Release\\net6.0\\b\" \"D:\\Repo\\Hybrid7z\\Hybrid7z\\bin\\Release\\net6.0\\c\""
+      "commandLineArgs": "\"D:\\Repo\\Hybrid7z\\Hybrid7z\\bin\\Release\\net6.0\\a\""
     }
   }
 }

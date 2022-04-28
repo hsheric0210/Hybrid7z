@@ -10,9 +10,9 @@ namespace Hybrid7z
 		private static readonly Dictionary<string, long> archiveFileSizeCache = new();
 		private static readonly Dictionary<(long, int), string> sizeSuffixCache = new();
 
-		public static (long, long) getCompressionRatio(string target, EnumerationOptions recursiveEnumeratorOptions, string? targetSimpleName = null)
+		public static (long, long) GetCompressionRatio(string target, EnumerationOptions recursiveEnumeratorOptions, string? targetSimpleName = null)
 		{
-			trimTrailingPathSeparators(ref target);
+			TrimTrailingPathSeparators(ref target);
 
 			if (!originalFilesSizeCache.TryGetValue(target, out var originalSize))
 			{
@@ -27,74 +27,83 @@ namespace Hybrid7z
 				archiveFileSizeCache[target] = compressedSize;
 			}
 
-			printCompressionRatio($"\"{targetSimpleName ?? Utils.extractTargetName(target)}\":", originalSize, compressedSize);
+			PrintCompressionRatio($"\"{targetSimpleName ?? Utils.ExtractTargetName(target)}\":", originalSize, compressedSize);
 
 			return (originalSize, compressedSize);
 		}
 
-		public static void printCompressionRatio(string name, long originalSize, long compressedSize)
+		public static void PrintCompressionRatio(string name, long originalSize, long compressedSize)
 		{
-			Console.WriteLine($"{name} {sizeSuffix(originalSize)} -> {sizeSuffix(compressedSize)} ({(originalSize > 0 ? (compressedSize * 100 / originalSize) : 0)}% compressed)");
+			Console.WriteLine($"{name} {SizeSuffix(originalSize)} -> {SizeSuffix(compressedSize)} ({(originalSize > 0 ? (compressedSize * 100 / originalSize) : 0)}% compressed)");
 
 			ConsoleColor prevColor = Console.ForegroundColor;
 			if (originalSize > compressedSize)
 			{
 				Console.ForegroundColor = ConsoleColor.Blue;
-				Console.WriteLine($"{name} Saved {sizeSuffix(originalSize - compressedSize)}");
+				Console.WriteLine($"{name} Saved {SizeSuffix(originalSize - compressedSize)}");
 			}
 			else
 			{
 				Console.ForegroundColor = ConsoleColor.Yellow;
-				Console.WriteLine($"{name} Wasted {sizeSuffix(compressedSize - originalSize)}");
+				Console.WriteLine($"{name} Wasted {SizeSuffix(compressedSize - originalSize)}");
 			}
 
 			Console.ForegroundColor = prevColor;
 
 		}
 
-		public static string extractTargetName(string path)
+		public static string ExtractTargetName(string path)
 		{
 			if (targetNameCache.TryGetValue(path, out string? targetName))
 				return targetName;
 
-			trimTrailingPathSeparators(ref path);
+			TrimTrailingPathSeparators(ref path);
 
 			targetName = path[(path.LastIndexOf('\\') + 1)..];
 			targetNameCache.TryAdd(path, targetName);
 			return targetName;
 		}
 
-		public static string extractSuperDirectoryName(string path)
+		public static string ExtractSuperDirectoryName(string path)
 		{
 			if (superNameCache.TryGetValue(path, out string? superName))
 				return superName;
 
-			trimTrailingPathSeparators(ref path);
+			TrimTrailingPathSeparators(ref path);
 
 			superName = path[..(path.LastIndexOf('\\') + 1)];
 			superNameCache.TryAdd(path, superName);
 			return superName;
 		}
 
-		public static void printConsoleAndTitle(string message)
+		public static void PrintConsoleAndTitle(string message, string? _namespace = null)
 		{
+			if (_namespace != null)
+				message = $"[{_namespace}] {message}";
 			Console.WriteLine(message);
 			Console.Title = message;
 		}
 
-		public static void trimTrailingPathSeparators(ref string path)
+		public static void PrintConsole(string message, string? _namespace = null)
+		{
+			if (_namespace != null)
+				message = $"[{_namespace}] {message}";
+			Console.WriteLine(message);
+		}
+
+		public static void TrimTrailingPathSeparators(ref string path)
 		{
 			while (path.EndsWith('\\'))
 				path = path[0..^1]; // Drop last char
 		}
 
-		public static void trimLeadingPathSeparators(ref string path)
+		public static void TrimLeadingPathSeparators(ref string path)
 		{
 			while (path.StartsWith('\\'))
 				path = path[1..]; // Drop first char
 		}
 
-		public static string get7ZipExitCodeInformation(int exitCode) => exitCode switch
+		public static string Get7ZipExitCodeInformation(int exitCode) => exitCode switch
 		{
 			1 => "Non-fatal warning(s)",
 			2 => "Fatal error",
@@ -104,7 +113,7 @@ namespace Hybrid7z
 			_ => "",
 		};
 
-		public static void pause()
+		public static void Pause()
 		{
 			string? line;
 			do
@@ -112,14 +121,14 @@ namespace Hybrid7z
 			while ((line?.Length ?? 0) <= 0);
 		}
 
-		public static void printError(string prefix, string details)
+		public static void PrintError(string prefix, string details)
 		{
 			ConsoleColor prevColor = Console.ForegroundColor;
 			Console.ForegroundColor = ConsoleColor.Red;
-			printConsoleAndTitle($"[{prefix}] {details}");
+			PrintConsole($"[{prefix}] {details}");
 			Console.WriteLine();
 			Console.WriteLine($"[{prefix}] Check the error details and press any key and enter to continue process...");
-			pause();
+			Pause();
 			Console.ForegroundColor = prevColor;
 		}
 
@@ -128,24 +137,24 @@ namespace Hybrid7z
 		private static readonly string[] SizeSuffixes = { "bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB" };
 		private static readonly string[] SizeSuffixesBinary = { "bytes", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB" };
 
-		public static string sizeSuffix(long value, int decimalPlaces = 1)
+		public static string SizeSuffix(long value, int decimalPlaces = 1)
 		{
 			if (!sizeSuffixCache.TryGetValue((value, decimalPlaces), out string? result))
 			{
-				result = $"({sizeSuffixInternal(value, decimalPlaces, SizeSuffixes, 1000)} / {sizeSuffixInternal(value, decimalPlaces, SizeSuffixesBinary, 1024)})";
+				result = $"({SizeSuffixInternal(value, decimalPlaces, SizeSuffixes, 1000)} / {SizeSuffixInternal(value, decimalPlaces, SizeSuffixesBinary, 1024)})";
 				sizeSuffixCache[(value, decimalPlaces)] = result;
 			}
 
 			return result;
 		}
 
-		private static string sizeSuffixInternal(long value, int decimalPlaces, string[] suffixes, int _base)
+		private static string SizeSuffixInternal(long value, int decimalPlaces, string[] suffixes, int _base)
 		{
 			if (decimalPlaces < 0)
 				throw new ArgumentOutOfRangeException(nameof(decimalPlaces));
 
 			if (value < 0)
-				return "-" + sizeSuffixInternal(-value, decimalPlaces, suffixes, _base);
+				return "-" + SizeSuffixInternal(-value, decimalPlaces, suffixes, _base);
 
 			if (value == 0)
 				return string.Format("{0:n" + decimalPlaces + "} bytes", 0);
