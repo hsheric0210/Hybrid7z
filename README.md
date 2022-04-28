@@ -1,4 +1,5 @@
 ﻿# Hybrid7z - Hybrid 7-zip compressor
+[![Build status](https://ci.appveyor.com/api/projects/status/g79batjl99dy2v9k/branch/main?svg=true)](https://ci.appveyor.com/project/hsheric0210/hybrid7z/branch/main)
 
 ### [7-Zip-zstd](https://github.com/mcmilk/7-Zip-zstd) or [7-Zip-FL2](https://github.com/conor42/7-Zip-FL2/releases/) is recommended
 (You should install them or put their portable executables next to the Hybrid7z executable)
