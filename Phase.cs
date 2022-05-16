@@ -202,7 +202,7 @@ namespace Hybrid7z
 			DateTime dateTime = DateTime.Now;
 
 			Console.WriteLine($">> ===== -----<< {phaseName} Phase (Sequential) >>----- ===== <<");
-			Utils.PrintConsole($"{indexPrefix} Started {indexPrefix} \"{currentTargetName}\" - {phaseName} Phase", _namespace);
+			Utils.PrintConsoleAndTitle($"{indexPrefix} Started {indexPrefix} \"{currentTargetName}\" - {phaseName} Phase", _namespace);
 			Console.WriteLine();
 
 			try
@@ -260,7 +260,7 @@ namespace Hybrid7z
 			}
 
 			Console.WriteLine();
-			Utils.PrintConsole($"{indexPrefix} \"{currentTargetName}\" - {phaseName} Phase Finished.", _namespace);
+			Utils.PrintConsoleAndTitle($"{indexPrefix} \"{currentTargetName}\" - {phaseName} Phase Finished.", _namespace);
 
 			return error;
 		}
