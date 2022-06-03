@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using NLog;
+using System.Diagnostics;
 using System.Text;
 
 namespace Hybrid7z
@@ -22,38 +23,39 @@ namespace Hybrid7z
 		public readonly bool isTerminal;
 		public readonly bool doesntSupportMultiThread;
 
-		public string? currentExecutablePath;
-		public string? phaseParameter;
-		public Config? config;
-		public string? logFileDirectoryName;
+		private Logger Logger;
 
-		public string[]? filterElements;
+		private string? CurrentExecutablePath;
+		private string? PhaseParameter;
+		private Config? Config;
+		private string? LogFileDirectoryName;
+		private string[]? FilterElements;
 
 		public Phase(string phaseName, bool isTerminal, bool doesntSupportMultiThread)
 		{
 			this.phaseName = phaseName;
 			this.isTerminal = isTerminal;
 			this.doesntSupportMultiThread = doesntSupportMultiThread;
+			Logger = LogManager.GetLogger(phaseName);
 		}
 
 		public void Initialize(string currentExecutablePath, Config config, string logFileDirectoryName)
 		{
-			this.currentExecutablePath = currentExecutablePath;
-			this.config = config;
-			this.logFileDirectoryName = logFileDirectoryName;
-			phaseParameter = config.getPhaseSpecificParameters(phaseName);
+			this.CurrentExecutablePath = currentExecutablePath;
+			this.Config = config;
+			this.LogFileDirectoryName = logFileDirectoryName;
+			PhaseParameter = config.GetPhaseSpecificParameters(phaseName);
 		}
 
-		public async Task ReadFileList()
+		public async Task ParseFileList()
 		{
 			if (isTerminal)
 				return;
 
-			const string _namespace = nameof(ReadFileList);
-			string fileListPath = $"{currentExecutablePath}{phaseName}{FILELIST_SUFFIX}";
+			string fileListPath = $"{CurrentExecutablePath}{phaseName}{FILELIST_SUFFIX}";
 			if (File.Exists(fileListPath))
 			{
-				Utils.PrintConsole($"Reading file list: \"{fileListPath}\"", _namespace);
+				Logger.Info($"Parsing file list: '{fileListPath}'");
 
 				try
 				{
@@ -63,34 +65,33 @@ namespace Hybrid7z
 						Utils.TrimLeadingPathSeparators(ref trimmed);
 						return trimmed;
 					}
-					filterElements = (from line in lines
+					FilterElements = (from line in lines
 									  let commentRemoved = line.Contains("//") ? line[..line.IndexOf("//")] : line
 									  where !string.IsNullOrWhiteSpace(commentRemoved)
 									  select DropLeadingPathSeparators(commentRemoved.Trim())).ToArray();
 				}
 				catch (Exception ex)
 				{
-					Utils.PrintConsole($"Error reading file list: {ex}", _namespace);
+					Logger.Error("Error reading file list", ex);
 				}
 			}
 			else
 			{
-				Utils.PrintConsole($"Phase filter file not found for phase: {fileListPath}", _namespace);
+				Logger.Warn($"Phase filter file not found for phase: '{fileListPath}'");
 			}
 		}
 
 		public string? RebuildFileList(string path, string fileNamePrefix, EnumerationOptions recursiveEnumeratorOptions, ref HashSet<string>? availableFilesForThisTarget)
 		{
-			if (isTerminal || config == null || filterElements == null)
+			if (isTerminal || Config == null || FilterElements == null)
 				return null;
 
-			const string _namespace = nameof(RebuildFileList);
-			bool includeRoot = config.IncludeRootDirectory;
+			bool includeRoot = Config.IncludeRootDirectory;
 			string targetDirectoryName = Utils.ExtractTargetName(path);
 
 			var newFilterElements = new List<string>();
 			HashSet<string>? availableFilesForThisTarget_ = availableFilesForThisTarget;
-			Parallel.ForEach(filterElements, filter =>
+			Parallel.ForEach(FilterElements, filter =>
 			{
 				try
 				{
@@ -99,7 +100,7 @@ namespace Hybrid7z
 						IEnumerable<string> files = Directory.EnumerateFiles(path, filter, recursiveEnumeratorOptions);
 						if (files.Any())
 						{
-							Utils.PrintConsole($"Found files for filter \"{filter}\"", _namespace);
+							Logger.Info($"Found files for filter '{filter}'");
 							newFilterElements.Add((includeRoot ? targetDirectoryName + "\\" : "") + filter);
 
 							if (availableFilesForThisTarget_ != null)
@@ -115,7 +116,7 @@ namespace Hybrid7z
 				}
 				catch (Exception ex)
 				{
-					Utils.PrintConsole($"Error re-building file list: {ex}", _namespace);
+					Logger.Error("Error re-building file list", ex);
 				}
 			});
 
@@ -125,11 +126,11 @@ namespace Hybrid7z
 			{
 				try
 				{
-					File.WriteAllLines(fileListPath = currentExecutablePath + fileNamePrefix + phaseName + REBUILDED_FILELIST_SUFFIX, newFilterElements);
+					File.WriteAllLines(fileListPath = CurrentExecutablePath + fileNamePrefix + phaseName + REBUILDED_FILELIST_SUFFIX, newFilterElements);
 				}
 				catch (Exception ex)
 				{
-					Console.WriteLine($"[RbFL] Error writing re-builded file list: {ex}");
+					Logger.Error("Error writing re-builded file list", ex);
 				}
 			}
 
@@ -138,7 +139,7 @@ namespace Hybrid7z
 
 		public async Task<bool> PerformPhaseParallel(string path, string extraParameters)
 		{
-			if (config == null)
+			if (Config == null)
 				return false;
 
 			string currentTargetName = Utils.ExtractTargetName(path);
@@ -148,9 +149,9 @@ namespace Hybrid7z
 			try
 			{
 				Process sevenzip = new();
-				sevenzip.StartInfo.FileName = config.get7zExecutable(phaseName);
-				sevenzip.StartInfo.WorkingDirectory = $"{(config.IncludeRootDirectory ? Utils.ExtractSuperDirectoryName(path) : path)}\\";
-				sevenzip.StartInfo.Arguments = $"{config.CommonArguments} {phaseParameter} {extraParameters}";
+				sevenzip.StartInfo.FileName = Config.Get7zExecutable(phaseName);
+				sevenzip.StartInfo.WorkingDirectory = $"{(Config.IncludeRootDirectory ? Utils.ExtractSuperDirectoryName(path) : path)}\\";
+				sevenzip.StartInfo.Arguments = $"{Config.CommonArguments} {PhaseParameter} {extraParameters}";
 				sevenzip.StartInfo.UseShellExecute = false;
 				sevenzip.StartInfo.RedirectStandardOutput = true;
 				sevenzip.StartInfo.RedirectStandardError = true;
@@ -159,8 +160,8 @@ namespace Hybrid7z
 
 				string outFileNameFormatted = string.Format(SEVENZIP_STDOUT_LOG_NAME, dateTime, sevenzip.Id, phaseName, currentTargetName);
 				string errFileNameFormatted = string.Format(SEVENZIP_STDERR_LOG_NAME, dateTime, sevenzip.Id, phaseName, currentTargetName);
-				string outFilePath = $"{currentExecutablePath}{logFileDirectoryName}\\{outFileNameFormatted}";
-				string errFilePath = $"{currentExecutablePath}{logFileDirectoryName}\\{errFileNameFormatted}";
+				string outFilePath = $"{CurrentExecutablePath}{LogFileDirectoryName}\\{outFileNameFormatted}";
+				string errFilePath = $"{CurrentExecutablePath}{LogFileDirectoryName}\\{errFileNameFormatted}";
 
 				// Redirect STDOUT, STDERR
 				(StringBuilder stdoutBuffer, StringBuilder stderrBuffer) = AttachLogBuffer(sevenzip, false);
@@ -173,7 +174,7 @@ namespace Hybrid7z
 				if (errorCode != 0)
 				{
 					Console.WriteLine();
-					Utils.PrintConsole($"7z process exited with errors/warnings. Error code: {errorCode} - {Utils.Get7ZipExitCodeInformation(errorCode)}. Check the following log files for more detailed informations.", _namespace);
+					Logger.Warn($"7z process exited with errors/warnings. Error code: {errorCode} - '{Utils.Get7ZipExitCodeInformation(errorCode)}'. Check the following log files for more detailed informations.".WithNamespace(_namespace));
 				}
 
 				var logTasks = new Task<bool>[2];
@@ -186,14 +187,14 @@ namespace Hybrid7z
 			catch (Exception ex)
 			{
 				Console.WriteLine();
-				Utils.PrintConsole($"Exception while executing 7z in parallel: {ex}", _namespace);
+				Logger.Error("Exception while executing 7z in parallel".WithNamespace(_namespace), ex);
 				return false;
 			}
 		}
 
 		public async Task<bool> PerformPhaseSequential(string path, string indexPrefix, string extraParameters)
 		{
-			if (config == null)
+			if (Config == null)
 				return false;
 
 			const string _namespace = nameof(PerformPhaseSequential);
@@ -202,15 +203,15 @@ namespace Hybrid7z
 			DateTime dateTime = DateTime.Now;
 
 			Console.WriteLine($">> ===== -----<< {phaseName} Phase (Sequential) >>----- ===== <<");
-			Utils.PrintConsoleAndTitle($"{indexPrefix} Started {indexPrefix} \"{currentTargetName}\" - {phaseName} Phase", _namespace);
+			Logger.Info($"{indexPrefix} Started {indexPrefix} \"{currentTargetName}\" - {phaseName} Phase".WithNamespaceAndTitle(_namespace));
 			Console.WriteLine();
 
 			try
 			{
 				Process sevenzip = new();
-				sevenzip.StartInfo.FileName = config.get7zExecutable(phaseName);
-				sevenzip.StartInfo.WorkingDirectory = $"{(config.IncludeRootDirectory ? Utils.ExtractSuperDirectoryName(path) : path)}\\";
-				sevenzip.StartInfo.Arguments = $"{config.CommonArguments} {phaseParameter} {extraParameters}";
+				sevenzip.StartInfo.FileName = Config.Get7zExecutable(phaseName);
+				sevenzip.StartInfo.WorkingDirectory = $"{(Config.IncludeRootDirectory ? Utils.ExtractSuperDirectoryName(path) : path)}\\";
+				sevenzip.StartInfo.Arguments = $"{Config.CommonArguments} {PhaseParameter} {extraParameters}";
 				sevenzip.StartInfo.UseShellExecute = false;
 				sevenzip.StartInfo.RedirectStandardOutput = true;
 				sevenzip.StartInfo.RedirectStandardError = true;
@@ -219,8 +220,8 @@ namespace Hybrid7z
 
 				string outFileNameFormatted = string.Format(SEVENZIP_STDOUT_LOG_NAME, dateTime, sevenzip.Id, phaseName, currentTargetName);
 				string errFileNameFormatted = string.Format(SEVENZIP_STDERR_LOG_NAME, dateTime, sevenzip.Id, phaseName, currentTargetName);
-				string outFilePath = $"{currentExecutablePath}{logFileDirectoryName}\\{outFileNameFormatted}";
-				string errFilePath = $"{currentExecutablePath}{logFileDirectoryName}\\{errFileNameFormatted}";
+				string outFilePath = $"{CurrentExecutablePath}{LogFileDirectoryName}\\{outFileNameFormatted}";
+				string errFilePath = $"{CurrentExecutablePath}{LogFileDirectoryName}\\{errFileNameFormatted}";
 
 				// Redirect STDOUT, STDERR
 				(StringBuilder stdoutBuffer, StringBuilder stderrBuffer) = AttachLogBuffer(sevenzip, true);
@@ -239,7 +240,7 @@ namespace Hybrid7z
 				}
 				catch (Exception ex)
 				{
-					Utils.PrintConsole($"{indexPrefix} Failed to write log 7z log files: {ex}", _namespace);
+					Logger.Error($"{indexPrefix} Failed to write log 7z log files: {ex}".WithNamespace(_namespace), ex);
 				}
 
 				errorCode = sevenzip.ExitCode;
@@ -247,7 +248,7 @@ namespace Hybrid7z
 			catch (Exception ex)
 			{
 				Console.WriteLine();
-				Utils.PrintConsole($"{indexPrefix} Exception while executing 7z: {ex}", _namespace);
+				Logger.Error($"{indexPrefix} Exception while executing 7z".WithNamespace(_namespace), ex);
 			}
 
 			bool error = errorCode != 0;
@@ -256,16 +257,16 @@ namespace Hybrid7z
 			{
 				Console.WriteLine();
 				Console.Title = $"{_namespace} {indexPrefix} Error compressing \"{path}\" - {phaseName} phase";
-				Utils.PrintError(_namespace, $"7z process exited with errors/warnings. Error code: {errorCode} ({Utils.Get7ZipExitCodeInformation(errorCode)}). Check the following log files for more detailed informations.");
+				Logger.Warn($"7z process exited with errors/warnings. Error code: {errorCode} ({Utils.Get7ZipExitCodeInformation(errorCode)}). Check the following log files for more detailed informations.".WithNamespace(_namespace));
 			}
 
 			Console.WriteLine();
-			Utils.PrintConsoleAndTitle($"{indexPrefix} \"{currentTargetName}\" - {phaseName} Phase Finished.", _namespace);
+			Logger.Debug($"{indexPrefix} \"{currentTargetName}\" - {phaseName} Phase Finished.".WithNamespace(_namespace));
 
 			return error;
 		}
 
-		private static async Task<bool> Write7zLog(string path, StringBuilder sb, string? displayName = null, string? _namespace = null)
+		private async Task<bool> Write7zLog(string path, StringBuilder sb, string? displayName = null, string? _namespace = null)
 		{
 			if (sb.Length > 0)
 			{
@@ -273,7 +274,7 @@ namespace Hybrid7z
 					await stream.WriteAsync(sb.ToString());
 
 				if (displayName != null)
-					Utils.PrintConsole($"{displayName} log: \"{path}\"", _namespace);
+					Logger.Debug($"{displayName} log: \"{path}\"".WithNamespace(_namespace));
 
 				return true;
 			}

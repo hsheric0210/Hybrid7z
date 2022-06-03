@@ -7,18 +7,36 @@ namespace Hybrid7z
 	{
 		private readonly IniFile config;
 
-		public string default7zExecutable;
-		public string CommonArguments;
-		public string[] phases;
-		public ConcurrentDictionary<string, string> sevenzipExecutables = new();
+		public string Default7zExecutable
+		{
+			get; set;
+		}
 
-		public bool IncludeRootDirectory;
+		public string CommonArguments
+		{
+			get; set;
+		}
+
+		public string[] phases
+		{
+			get; set;
+		}
+
+		public ConcurrentDictionary<string, string> sevenzipExecutables
+		{
+			get; set;
+		} = new();
+
+		public bool IncludeRootDirectory
+		{
+			get; set;
+		}
 
 		public Config(IniFile config)
 		{
 			this.config = config;
 
-			default7zExecutable = config.read("Executable", "7z");
+			Default7zExecutable = config.read("Executable", "7z");
 			CommonArguments = config.read("BaseParameters", "7z");
 			phases = config.read("Phases", "7z").Split('-');
 
@@ -26,30 +44,30 @@ namespace Hybrid7z
 			IncludeRootDirectory = !string.Equals(includeRootStr, "0") && !string.Equals(includeRootStr, "false", StringComparison.InvariantCultureIgnoreCase) && !string.Equals(includeRootStr, "no", StringComparison.InvariantCultureIgnoreCase);
 		}
 
-		public string get7zExecutable(string phaseName)
+		public string Get7zExecutable(string phaseName)
 		{
 			if (sevenzipExecutables.TryGetValue(phaseName, out var exe))
 				return exe;
 
 			if (config.keyExists(phaseName, "7zExecutable"))
 				exe = config.read(phaseName, "7zExecutable");
-			else 
-				exe = default7zExecutable;
+			else
+				exe = Default7zExecutable;
 			sevenzipExecutables[phaseName] = exe;
 			return exe;
 		}
 
-		public string getPhaseSpecificParameters(string phaseName) => config.read(phaseName, "Parameters");
+		public string GetPhaseSpecificParameters(string phaseName) => config.read(phaseName, "Parameters");
 
-		public static void saveDefaults(string path)
+		public static void SaveDefaults(string path)
 		{
 			var builder = new StringBuilder();
 
 			builder.AppendLine("[7z]");
-			
+
 			builder.AppendLine("; 7-Zip executable name");
 			builder.AppendLine("Executable=7z.exe");
-			
+
 			builder.AppendLine("; Common 7-Zip command-line parameters that affects on all phases");
 			builder.AppendLine("BaseParameters=a -t7z -mhe -ms=1g -mqs -slp -bt -bb3 -bsp1 -sae");
 
@@ -74,7 +92,7 @@ namespace Hybrid7z
 
 			builder.AppendLine("; 7-Zip command-line parameters use on x86 phase");
 			builder.AppendLine("x86=-mf=BCJ2 -m0=LZMA2 -mx=9 -myx=9 -md=512m -mfb=273 -mmt=8 -mmtf=on -mmf=bt4 -mmc=10000 -mlc=4");
-			
+
 			builder.AppendLine("; 7-Zip command-line parameters use on Brotli phase");
 			builder.AppendLine("Brotli=-m0=Brotli -mx=11 -myx=9 -mmt=16");
 

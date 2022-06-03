@@ -1,4 +1,5 @@
-﻿using System.Collections.Concurrent;
+﻿using NLog;
+using System.Collections.Concurrent;
 
 namespace Hybrid7z
 {
@@ -9,6 +10,11 @@ namespace Hybrid7z
 		private static readonly Dictionary<string, long> originalFilesSizeCache = new();
 		private static readonly Dictionary<string, long> archiveFileSizeCache = new();
 		private static readonly Dictionary<(long, int), string> sizeSuffixCache = new();
+
+		public static bool NoPause
+		{
+			get; set;
+		}
 
 		public static (long, long) GetCompressionRatio(string target, EnumerationOptions recursiveEnumeratorOptions, string? targetSimpleName = null)
 		{
@@ -27,29 +33,20 @@ namespace Hybrid7z
 				archiveFileSizeCache[target] = compressedSize;
 			}
 
-			PrintCompressionRatio($"\"{targetSimpleName ?? Utils.ExtractTargetName(target)}\":", originalSize, compressedSize);
+			PrintCompressionRatio($"\"{targetSimpleName ?? ExtractTargetName(target)}\":", originalSize, compressedSize);
 
 			return (originalSize, compressedSize);
 		}
 
 		public static void PrintCompressionRatio(string name, long originalSize, long compressedSize)
 		{
-			Console.WriteLine($"{name} {SizeSuffix(originalSize)} -> {SizeSuffix(compressedSize)} ({(originalSize > 0 ? (compressedSize * 100 / originalSize) : 0)}% compressed)");
+			Logger logger = LogManager.GetLogger("Result");
+			logger.Info($"DONE: {name} {SizeSuffix(originalSize)} -> {SizeSuffix(compressedSize)} ({(originalSize > 0 ? (compressedSize * 100 / originalSize) : 0)}% compressed)");
 
-			ConsoleColor prevColor = Console.ForegroundColor;
 			if (originalSize > compressedSize)
-			{
-				Console.ForegroundColor = ConsoleColor.Blue;
-				Console.WriteLine($"{name} Saved {SizeSuffix(originalSize - compressedSize)}");
-			}
+				logger.Info($"DONE: - {name} Saved {SizeSuffix(originalSize - compressedSize)}");
 			else
-			{
-				Console.ForegroundColor = ConsoleColor.Yellow;
-				Console.WriteLine($"{name} Wasted {SizeSuffix(compressedSize - originalSize)}");
-			}
-
-			Console.ForegroundColor = prevColor;
-
+				logger.Warn($"DONE: - {name} Wasted {SizeSuffix(compressedSize - originalSize)}");
 		}
 
 		public static string ExtractTargetName(string path)
@@ -76,21 +73,6 @@ namespace Hybrid7z
 			return superName;
 		}
 
-		public static void PrintConsoleAndTitle(string message, string? _namespace = null)
-		{
-			if (_namespace != null)
-				message = $"[{_namespace}] {message}";
-			Console.WriteLine(message);
-			Console.Title = message;
-		}
-
-		public static void PrintConsole(string message, string? _namespace = null)
-		{
-			if (_namespace != null)
-				message = $"[{_namespace}] {message}";
-			Console.WriteLine(message);
-		}
-
 		public static void TrimTrailingPathSeparators(ref string path)
 		{
 			while (path.EndsWith('\\'))
@@ -113,23 +95,24 @@ namespace Hybrid7z
 			_ => "",
 		};
 
-		public static void Pause()
+		public static void Pause(string message)
 		{
+			if (NoPause)
+				return;
+			Console.WriteLine(message);
 			string? line;
 			do
 				line = Console.ReadLine();
 			while ((line?.Length ?? 0) <= 0);
 		}
 
-		public static void PrintError(string prefix, string details)
+		public static void LogError(this Logger logger, string prefix, string details, Exception? ex = null)
 		{
-			ConsoleColor prevColor = Console.ForegroundColor;
-			Console.ForegroundColor = ConsoleColor.Red;
-			PrintConsole($"[{prefix}] {details}");
-			Console.WriteLine();
-			Console.WriteLine($"[{prefix}] Check the error details and press any key and enter to continue process...");
-			Pause();
-			Console.ForegroundColor = prevColor;
+			if (ex == null)
+				logger.Error(details.WithNamespace(prefix));
+			else
+				logger.Error(ex, details.WithNamespace(prefix));
+			Pause("Check the error details and press any key and enter to continue process...".WithNamespace(prefix));
 		}
 
 		// https://stackoverflow.com/questions/14488796/does-net-provide-an-easy-way-convert-bytes-to-kb-mb-gb-etc
