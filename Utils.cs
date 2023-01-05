@@ -1,4 +1,4 @@
-﻿using NLog;
+﻿using Serilog;
 using System.Collections.Concurrent;
 
 namespace Hybrid7z
@@ -40,18 +40,17 @@ namespace Hybrid7z
 
 		public static void PrintCompressionRatio(string name, long originalSize, long compressedSize)
 		{
-			Logger logger = LogManager.GetLogger("Result");
-			logger.Info($"DONE: {name} {SizeSuffix(originalSize)} -> {SizeSuffix(compressedSize)} ({(originalSize > 0 ? (compressedSize * 100 / originalSize) : 0)}% compressed)");
+			Log.Information($"DONE: {name} {SizeSuffix(originalSize)} -> {SizeSuffix(compressedSize)} ({(originalSize > 0 ? (compressedSize * 100 / originalSize) : 0)}% compressed)");
 
 			if (originalSize > compressedSize)
-				logger.Info($"DONE: - {name} Saved {SizeSuffix(originalSize - compressedSize)}");
+				Log.Information($"DONE: - {name} Saved {SizeSuffix(originalSize - compressedSize)}");
 			else
-				logger.Warn($"DONE: - {name} Wasted {SizeSuffix(compressedSize - originalSize)}");
+				Log.Warning($"DONE: - {name} Wasted {SizeSuffix(compressedSize - originalSize)}");
 		}
 
 		public static string ExtractTargetName(string path)
 		{
-			if (targetNameCache.TryGetValue(path, out string? targetName))
+			if (targetNameCache.TryGetValue(path, out var targetName))
 				return targetName;
 
 			TrimTrailingPathSeparators(ref path);
@@ -63,7 +62,7 @@ namespace Hybrid7z
 
 		public static string ExtractSuperDirectoryName(string path)
 		{
-			if (superNameCache.TryGetValue(path, out string? superName))
+			if (superNameCache.TryGetValue(path, out var superName))
 				return superName;
 
 			TrimTrailingPathSeparators(ref path);
@@ -95,7 +94,7 @@ namespace Hybrid7z
 			_ => "",
 		};
 
-		public static void Pause(string message)
+		public static void UserInput(string message)
 		{
 			if (NoPause)
 				return;
@@ -106,15 +105,6 @@ namespace Hybrid7z
 			while ((line?.Length ?? 0) <= 0);
 		}
 
-		public static void LogError(this Logger logger, string prefix, string details, Exception? ex = null)
-		{
-			if (ex == null)
-				logger.Error(details.WithNamespace(prefix));
-			else
-				logger.Error(ex, details.WithNamespace(prefix));
-			Pause("Check the error details and press any key and enter to continue process...".WithNamespace(prefix));
-		}
-
 		// https://stackoverflow.com/questions/14488796/does-net-provide-an-easy-way-convert-bytes-to-kb-mb-gb-etc
 
 		private static readonly string[] SizeSuffixes = { "bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB" };
@@ -122,7 +112,7 @@ namespace Hybrid7z
 
 		public static string SizeSuffix(long value, int decimalPlaces = 1)
 		{
-			if (!sizeSuffixCache.TryGetValue((value, decimalPlaces), out string? result))
+			if (!sizeSuffixCache.TryGetValue((value, decimalPlaces), out var result))
 			{
 				result = $"({SizeSuffixInternal(value, decimalPlaces, SizeSuffixes, 1000)} / {SizeSuffixInternal(value, decimalPlaces, SizeSuffixesBinary, 1024)})";
 				sizeSuffixCache[(value, decimalPlaces)] = result;
@@ -142,9 +132,9 @@ namespace Hybrid7z
 			if (value == 0)
 				return string.Format("{0:n" + decimalPlaces + "} bytes", 0);
 
-			int mag = (int)Math.Log(value, _base);
+			var mag = (int)Math.Log(value, _base);
 
-			decimal adjustedSize = (decimal)value / (_base == 1024 ? (1L << (mag * 10)) : (int)Math.Pow(_base, mag));
+			var adjustedSize = (decimal)value / (_base == 1024 ? (1L << (mag * 10)) : (int)Math.Pow(_base, mag));
 
 			if (Math.Round(adjustedSize, decimalPlaces) >= 1000)
 			{

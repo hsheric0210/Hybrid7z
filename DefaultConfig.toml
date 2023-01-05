@@ -1,0 +1,35 @@
+﻿[archiver]
+executable = "7z.exe" # Global archiver executable path
+parameters = "a -t7z -mhe -ms=1G -mqs -slp -bt -bb3 -bsp1 -sae -p{ArchivePassword}" # Global archiver execution parameters
+
+
+[phase]
+phase_list = [ "PPMd", "Copy", "LZMA2", "x86", "Brotli", "FastLZMA2" ] # Registered phase list
+
+# Per-phase parallel execution ability
+# Enable if specified phase uses only small amount of cores/threads and low memories (ex: PPMd), disable if they uses huge amount of cores/threads or memories (ex: LZMA2)
+[phase.parallel]
+PPMd = true
+Copy = true
+LZMA2 = false
+x86 = false
+Brotli = false
+FastLZMA2 = false
+
+# Per-phase parameters
+# You can specify archiver parameters for each phase
+[phase.parameters]
+PPMd = "-m0=PPMd -mx=9 -myx=9 -mmem=1024m -mo=32 -mmt=1"
+Copy = "-m0=Copy -mx=0"
+LZMA2 = "-m0=LZMA2 -mx=9 -myx=9 -md=512m -mfb=273 -mmt=8 -mmtf=on -mmf=bt4 -mmc=10000 -mlc=4"
+x86 = "-mf=BCJ2 -m0=LZMA2 -mx=9 -myx=9 -md=512m -mfb=273 -mmt=8 -mmtf=on -mmf=bt4 -mmc=10000 -mlc=4"
+Brotli = "-m0=Brotli -mx=11 -myx=9 -mmt=16"
+FastLZMA2 = "-m0=FLZMA2 -mx=9 -myx=9 -md=1024m -mfb=273 -mmt=16 -mmtf=on -mlc=4"
+
+# Per-phase archiver override
+[phase.archiver_override]
+LZMA2 = "7zG.exe"
+Brotli = "7zG.exe"
+
+[misc]
+include_root_folder = false # Should the archive includes the root folder?

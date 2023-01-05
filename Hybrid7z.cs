@@ -1,5 +1,7 @@
-﻿using NLog;
+﻿using Serilog;
+using Serilog.Sinks.SystemConsole.Themes;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 
 namespace Hybrid7z
@@ -8,12 +10,10 @@ namespace Hybrid7z
 	{
 		public const string VERSION = "0.1";
 		public const string CONFIG_NAME = "Hybrid7z.ini";
+		public const string LogFileName = "Hybrid7z.log";
 
-		private readonly static Logger Logger = LogManager.GetLogger("Main");
-
-		private Phase[] Phases;
+		private IList<Phase> PhaseList;
 		private string CurrentExecutablePath;
-
 		private Config config;
 
 		// KEY: Target Directory Name (Not Path)
@@ -30,90 +30,103 @@ namespace Hybrid7z
 
 		public static void Main(string[] args)
 		{
-			Logger.Info($"Hybrid7z v{VERSION} started");
+			try
+			{
+				Log.Logger = new LoggerConfiguration()
+					.MinimumLevel.Verbose()
+					.WriteTo.Async(a => a.File(LogFileName, fileSizeLimitBytes: 268435456, rollOnFileSizeLimit: true, buffered: true, flushToDiskInterval: TimeSpan.FromSeconds(2)))
+					.WriteTo.Async(a => a.Console(theme: AnsiConsoleTheme.Code))
+					.CreateLogger();
+			}
+			catch (Exception ex)
+			{
+				Console.WriteLine("Logger creation failure.");
+				Console.WriteLine(ex);
+			}
 
-			string currentExecutablePath = AppDomain.CurrentDomain.BaseDirectory;
+			Log.Information($"Hybrid7z v{VERSION} started on {{date}}", DateTime.Now);
+
+			var cwd = AppDomain.CurrentDomain.BaseDirectory;
 
 			// Check configuration file is exists
-			if (!File.Exists(currentExecutablePath + CONFIG_NAME))
+			var configPath = cwd + CONFIG_NAME;
+			if (!File.Exists(configPath))
 			{
-				Logger.Info("[CFG] Writing default config");
-				Config.SaveDefaults(currentExecutablePath + CONFIG_NAME);
+				Log.Warning("Configuration file not found! Writing default configuration file to: {file}", configPath);
+				Config.SaveDefaults(configPath);
 			}
 
 			// Start the program
 			try
 			{
-				new Hybrid7z().Start(currentExecutablePath, args).Wait();
+				new Hybrid7z().Start(cwd, args).Wait();
 			}
 			catch (Exception ex)
 			{
-				Logger.Error("ERR", $"Unhandled exception caught! Please report it to the author: {ex}", ex);
+				Log.Fatal(ex, "Unhandled exception caught! Please report to the author.");
 			}
 		}
 
 		private async Task InitializePhases(string logDir)
 		{
 			var tasks = new List<Task>();
-			foreach (Phase phase in Phases)
+			foreach (Phase phase in PhaseList)
 			{
 				tasks.Add(Task.Run(async () =>
 				{
-					Logger.Debug($"Initializing phase: {phase.phaseName}");
+					Log.Debug("Phase initialization: {phase}", phase.phaseName);
 					phase.Initialize(CurrentExecutablePath, config, logDir);
+					Log.Information("Phase initialized: {phase}", phase.phaseName);
 					await phase.ParseFileList();
 				}));
 			}
-
 			await Task.WhenAll(tasks);
 		}
 
-		private static async Task<IEnumerable<string>> GetTargets(string[] parameters, int switchIndex)
+		private static async Task<ICollection<string>> GetTargets(string[] parameters, int switchIndex)
 		{
 			var tasks = new List<Task<string?>>();
-
-			for (int i = switchIndex; i < parameters.Length; i++)
+			for (var i = switchIndex; i < parameters.Length; i++)
 			{
-				string targetPath = parameters[i];
 				tasks.Add(Task.Run(() =>
 				{
-					if (Directory.Exists(targetPath))
+					var path = parameters[i];
+					Utils.TrimTrailingPathSeparators(ref path);
+					if (Directory.Exists(path))
 					{
-						Logger.Info($"Found directory - \"{targetPath}\"");
-						string targetPathCopy = targetPath;
-						Utils.TrimTrailingPathSeparators(ref targetPathCopy);
-						return targetPathCopy;
+						Log.Information("Found directory: {path}", path);
+						return path;
 					}
-					else if (File.Exists(targetPath))
+					else if (File.Exists(path))
 					{
-						Logger.Warn($"Currently, file are not supported (only directories are supported) - \"{targetPath}\"");
+						// FIXME: File support
+						Log.Warning("Currently, file are not supported (only directories are supported): {path}", path);
 					}
 					else
 					{
-						Logger.Warn($"File not exists - \"{targetPath}\"");
+						Log.Warning("Filesystem entry not exists: {path}", path);
 					}
 
 					return null;
 				}));
 			}
-
-			return from list in (await Task.WhenAll(tasks)) where list is not null select list;
+			return (from list in await Task.WhenAll(tasks) where list is not null select list).ToList();
 		}
 
-		private async Task<bool> ProcessPhase(IEnumerable<string> targets)
+		private async Task<bool> ProcessPhase(ICollection<string> targets)
 		{
-			bool error = false;
+			var error = false;
 
 			// Create log file repository
 			if (targets.Any())
 				Directory.CreateDirectory($"{CurrentExecutablePath}logs");
 
-			string extraParameters = "";
+			var extraParameters = "";
 			if (File.Exists("Exclude.txt"))
 				extraParameters = $"-xr@\"{CurrentExecutablePath}Exclude.txt\"";
 
 			var sequentialPhases = new List<Phase>();
-			foreach (Phase? phase in Phases)
+			foreach (Phase? phase in PhaseList)
 			{
 				if (phase.doesntSupportMultiThread)
 					error = await RunParallelPhase(phase, targets, extraParameters) || error;
@@ -122,18 +135,18 @@ namespace Hybrid7z
 			}
 
 			// Phases with multi-thread support MUST run sequentially, Or they will crash because of insufficient RAM or other system resources. (Especially, LZMA2, Fast-LZMA2 phase)
-			int totalTargetCount = targets.Count();
-			int currentFileIndex = 1;
-			foreach (string? target in targets)
+			var totalTargetCount = targets.Count;
+			var currentFileIndex = 1;
+			foreach (var target in targets)
 			{
-				string titlePrefix = $"[{currentFileIndex}/{totalTargetCount}]";
+				var titlePrefix = $"[{currentFileIndex}/{totalTargetCount}]";
 				error = await RunSequentialPhases(sequentialPhases, target, titlePrefix, extraParameters) || error;
 				currentFileIndex++;
 			}
 
 			long original = 0;
 			long compressed = 0;
-			foreach (string? target in targets)
+			foreach (var target in targets)
 			{
 				(long original, long compressed) currentRatio = Utils.GetCompressionRatio(target, RecursiveEnumeratorOptions);
 				original += currentRatio.original;
@@ -147,15 +160,14 @@ namespace Hybrid7z
 
 		private static int ParseParameters(string[] parameters)
 		{
-			int switchIndex = 0;
+			var switchIndex = 0;
 			if (parameters.Length > 0)
 			{
-				for (int n = parameters.Length; switchIndex < n; switchIndex++)
+				for (var n = parameters.Length; switchIndex < n; switchIndex++)
 				{
-					string rawParam = parameters[switchIndex];
+					var rawParam = parameters[switchIndex];
 					if (rawParam.StartsWith('/') || rawParam.StartsWith('-'))
 					{
-						// Trim all leading '/' and '-' characters
 						string realParam;
 						do
 							realParam = rawParam[1..];
@@ -169,6 +181,7 @@ namespace Hybrid7z
 							{
 								Console.WriteLine("Hybrid7z.exe <switches> <target folders>");
 								Console.WriteLine("Note that 'Hybrid7z.exe <target folders> <switches>' is not working");
+								Console.WriteLine("No switch prefix and switch prefix '-', '/' is all supported: 'help' and '-help' and '/help' do the same thing");
 								Console.WriteLine("Available commands:");
 								Console.WriteLine("\t/help, /h, /?\t\t\t\t\tPrint the usages");
 								Console.WriteLine("\t/log, /logDir, /logRoot\t\t<dirName>\tSpecify the directory to save the log files (non-existent directory name is allowed)");
@@ -183,9 +196,8 @@ namespace Hybrid7z
 								if (parameters.Length > switchIndex + 1)
 									logRoot = parameters[switchIndex + 1];
 								else
-									Logger.Info("[LogRoot] You must specify the log root folder after the logRoot switch (ex: '-logroot logs')");
+									Log.Warning("You must specify the log root folder after the logRoot switch (ex: '-logroot logs')");
 								switchIndex++; // Skip trailing directory name part
-
 								break;
 							}
 
@@ -194,7 +206,7 @@ namespace Hybrid7z
 							case "nobreak":
 							case "nopause":
 							{
-								Logger.Info("[NoPause] NoPause mode enabled.");
+								Log.Warning("No-Pause mode enabled. All user prompts will be assumed as 'Yes'.");
 								Utils.NoPause = true;
 								break;
 							}
@@ -212,86 +224,76 @@ namespace Hybrid7z
 
 		private static string logRoot = "logs";
 
-		public async Task Start(string currentExecutablePath, string[] parameters)
+		public async Task Start(string cwd, string[] parameters)
 		{
-			this.CurrentExecutablePath = currentExecutablePath;
+			this.CurrentExecutablePath = cwd;
 
 			// Parse the command-line parameters
 			var switchIndex = ParseParameters(parameters);
 			if (switchIndex < 0)
 				return;
 
-			Config? _config = LoadConfig(currentExecutablePath);
+			Config? _config = LoadConfig(cwd);
 			if (_config == null)
 				return;
 			config = _config;
 
-			if (!ConstructPhases(_config.phases))
+			if (!ConstructPhases(_config.PhaseList))
 				return;
 
-			IEnumerable<string>? targets = null;
+			ICollection<string>? targets = null;
 			var parallel = new Task[2];
 			parallel[0] = InitializeWholePhases();
 
 			// Filter available targets
 			parallel[1] = Task.Run(async () => targets = await GetTargets(parameters, switchIndex));
-
 			await Task.WhenAll(parallel);
 
-			if (targets == null)
-			{
-				Logger.Warn("Exit program because targets is null (unexpected null)");
+			// Cannot be triggered
+			if (targets is null)
 				return;
-			}
 
-			// Re-build file lists
 			await RebuildFileLists(targets);
 
-			Logger.Debug("Now starting the compression...");
-
-			// Process phases
-			if (!targets.Any())
-				Logger.Warn("No target supplied.");
+			Log.Debug("+++ Compression");
+			if (targets.Count == 0)
+				Log.Error("No target supplied.");
 			else if (await ProcessPhase(targets))
-				Logger.Warn("At least one error/warning occurred during the progress.");
+				Log.Warning("At least one error/warning occurred during the progress.");
 			else
-				Logger.Debug("DONE: All files are successfully proceed without any error(s).");
+				Log.Debug("DONE: All files are successfully proceed without any error(s).");
 
-			// Wait until any key has been pressed
-			Utils.Pause("Press any key and enter to delete leftover filelists...");
-
-			// Delete any left-over filelist files
 			Parallel.ForEach(RebuildedFileLists.Values, files =>
 			{
 				Parallel.ForEach(files.Values, file =>
 				{
 					if (file != null && File.Exists(file))
 					{
+						Log.Debug("Rebuilded phase filter deletion: {path}", file);
 						File.Delete(file);
-						Logger.Info($"Deleted (re-builded) file list \"{file}\"");
 					}
 				});
 			});
 
 			// Wait until any key has been pressed
-			Utils.Pause("Press any key and enter to exit program...");
+			Utils.UserInput("Press any key and enter to exit program...");
 		}
 
 		private async Task InitializeWholePhases()
 		{
 			var sw = new Stopwatch();
 			// Initialize phases
-			Logger.Info("Initializing phases...");
+			Log.Debug("+++ Phase initialization");
 			sw.Start();
 			await InitializePhases(logRoot);
 			sw.Stop();
-			Logger.Info($"Done initializing phases. (Took {sw.ElapsedMilliseconds}ms)");
+			Log.Information("--- Phase initialization: {took}ms", sw.ElapsedMilliseconds);
 		}
 
 		private async Task RebuildFileLists(IEnumerable<string> targets)
 		{
 			var sw = new Stopwatch();
-			Logger.Debug("Re-building file lists...");
+			Log.Debug("+++ Phase filter rebuilding");
 			try
 			{
 				sw.Restart();
@@ -301,29 +303,30 @@ namespace Hybrid7z
 				ConcurrentDictionary<string, HashSet<string>> availableFiles = new();
 
 				var tasks = new List<Task>();
-				foreach (Phase phase in Phases)
+				foreach (Phase phase in PhaseList)
 				{
-					string phaseName = phase.phaseName;
+					var phaseName = phase.phaseName;
 					tasks.Add(Parallel.ForEachAsync(targets, (target, _) =>
 					{
+						// FIXME: 얘 원래 여기가 아니라 Phase foreach 바깥에 있어야지 원래 의도한대로 'RebuildFileList에서 필터에 맞는 파일들 쳐낸 후, files에서 해당 파일 공제'함으로써 '이미 어떤 페이즈를 통해 처리된 파일이 다른 페이즈를 통해 다시 처리되는 것을 방지'하는 역할을 수행할 수 있는 것 아닌가?
 						var files = Directory
-													.EnumerateFiles(target, "*", RecursiveEnumeratorOptions)
-													.Select(path => path.ToUpperInvariant())
-													.ToHashSet();
+							.EnumerateFiles(target, "*", RecursiveEnumeratorOptions)
+							.Select(path => path.ToUpperInvariant())
+							.ToHashSet();
 
-						string targetName = Utils.ExtractTargetName(target);
-						Logger.Info($"Re-building file list for [file=\"{targetName}\", phase={phaseName}]");
+						var targetName = Utils.ExtractTargetName(target);
+						Log.Debug("Phase {phase} filter rebuild: {path}", phaseName, targetName);
 
 						// This will remove all paths(files) matching the specified filter from availableFilesForThisTarget.
-						string? path = phase.RebuildFileList(target, $"{targetName}.", RecursiveEnumeratorOptions, ref files);
+						var filterPath = phase.RebuildFilter(target, $"{targetName}.", RecursiveEnumeratorOptions, ref files);
 
 						// Fail-safe
 						if (!RebuildedFileLists.ContainsKey(targetName))
 							RebuildedFileLists[targetName] = new();
 
 						Dictionary<string, string> map = RebuildedFileLists[targetName];
-						if (path != null)
-							map.Add(phaseName, path);
+						if (filterPath != null)
+							map.Add(phaseName, filterPath);
 						availableFiles[target] = files;
 						return default;
 					}));
@@ -331,7 +334,7 @@ namespace Hybrid7z
 				await Task.WhenAll(tasks);
 
 				// TODO: Improve this ugly solution
-				foreach (string target in targets)
+				foreach (var target in targets)
 				{
 					if (availableFiles.TryGetValue(target, out HashSet<string>? avail) && avail.Count > 0)
 						TerminalPhaseInclusion.Add(target);
@@ -339,32 +342,31 @@ namespace Hybrid7z
 			}
 			catch (Exception ex)
 			{
-				Logger.Error($"Exception occurred while re-building filelists: {ex}");
+				Log.Error(ex, "Exception during phase filter rebuilding.");
 			}
 			sw.Stop();
 
-			Logger.Info($"Done rebuilding file lists (Took {sw.ElapsedMilliseconds}ms)");
+			Log.Information("--- Phase filter rebuilding: {took}ms", sw.ElapsedMilliseconds);
 		}
 
-		private bool ConstructPhases(string[] phaseNames)
+		private bool ConstructPhases(IReadOnlyList<string> phaseList)
 		{
 			try
 			{
-				// Construct phases
-				int count = phaseNames.Length;
-				Phases = new Phase[count];
-				for (int i = 0; i < count; i++)
+				var count = phaseList.Count;
+				PhaseList = new Phase[count];
+				for (var i = 0; i < count; i++)
 				{
-					string phaseName = phaseNames[i][1..];
-					bool terminal = i >= count - 1;
-					bool runParallel = char.ToLower(phaseNames[i][0]) == 'y';
-					Phases[i] = new Phase(phaseName, terminal, runParallel);
-					Logger.Info($"Phase[{i}] = \"{phaseName}\" (terminal={terminal}, parallel={runParallel})");
+					var phaseName = phaseList[i];
+					var isTerminal = i == count - 1;
+					var parallel = config.IsPhaseParallel(phaseList[i]);
+					PhaseList[i] = new Phase(phaseName, isTerminal, parallel);
+					Log.Information("Detected phase: name={name}, terminal={terminal}, parallel={parallel}", phaseName, isTerminal, parallel);
 				}
 			}
 			catch (Exception ex)
 			{
-				Logger.Error("Can't construct phases due exception", ex);
+				Log.Error(ex, "Exception during phase construction.");
 				return false;
 			}
 
@@ -373,65 +375,58 @@ namespace Hybrid7z
 
 		private static Config? LoadConfig(string currentExecutablePath)
 		{
-			Logger.Info($"Loading config... ({CONFIG_NAME})");
+			Log.Information("+++ Config loading");
 
 			try
 			{
-				return new Config(new IniFile($"{currentExecutablePath}{CONFIG_NAME}"));
+				return new Config(currentExecutablePath + CONFIG_NAME);
 			}
 			catch (Exception ex)
 			{
-				Logger.Error("Can't load config due exception", ex);
+				Log.Error(ex, "Exception during config loading.");
 			}
 			return null;
 		}
 
 		private async Task<bool> RunParallelPhase(Phase phase, IEnumerable<string> paths, string extraParameters)
 		{
-			string phaseName = phase.phaseName;
-			string prefix = $"{nameof(RunParallelPhase)}({phaseName})";
-
-			bool includeRoot = config.IncludeRootDirectory;
+			var phaseName = phase.phaseName;
+			var includeRoot = config.IncludeRootDirectory;
 
 			// Because Interlocked.CompareExchange doesn't supports bool
-			int error = 0;
+			var error = 0;
 
-			Console.WriteLine($"<<==================== Starting Parallel({phaseName}) ====================>>");
-
+			Log.Debug("+++ Phase parallel execution: {phase}", phaseName);
 			try
 			{
 				await Parallel.ForEachAsync(paths, async (path, _) =>
 				{
-					string currentTargetName = Utils.ExtractTargetName(path);
-					if (RebuildedFileLists.TryGetValue(currentTargetName, out Dictionary<string, string>? fileListMap) && fileListMap.TryGetValue(phaseName, out string? fileListPath) && fileListPath != null && !await phase.PerformPhaseParallel(path, $"{extraParameters} -ir@\"{fileListPath}\" -- \"{$"{(includeRoot ? "" : "..\\")}{currentTargetName}.7z"}\""))
+					var currentTargetName = Utils.ExtractTargetName(path);
+					if (RebuildedFileLists.TryGetValue(currentTargetName, out Dictionary<string, string>? fileListMap) && fileListMap.TryGetValue(phaseName, out var fileListPath) && fileListPath != null && !await phase.PerformPhaseParallel(path, $"{extraParameters} -ir@\"{fileListPath}\" -- \"{$"{(includeRoot ? "" : "..\\")}{currentTargetName}.7z"}\""))
 						Interlocked.CompareExchange(ref error, 1, 0);
 				});
 			}
 			catch (AggregateException ex)
 			{
-				Logger.Error("AggregateException occurred during parallel execution".WithNamespace(prefix), ex);
+				Log.Error(ex, "AggregateException during parallel execution of phase: {phase}", phaseName);
 				error = 1;
 			}
 
 			if (error != 0)
-				Logger.Error($"Error running phase {phaseName} in parallel.".WithNamespace(prefix));
-			else
-				Logger.Info($"Successfully finished phase {phaseName} without any errors.".WithNamespace(prefix));
-			Console.WriteLine($"<<==================== Finished Parallel({phaseName}) ====================>>");
+				Log.Error("Error during parallel execution of phase: {phase}", phaseName);
+			Log.Information("--- Phase parallel execution: {phase}", phaseName);
 			return error != 0;
 		}
 
-		private async Task<bool> RunSequentialPhases(IEnumerable<Phase> phases, string target, string titlePrefix, string extraParameters)
+		private async Task<bool> RunSequentialPhases(IEnumerable<Phase> phases, string target, string _, string extraParameters)
 		{
-			bool includeRoot = config.IncludeRootDirectory;
-			string currentTargetName = Utils.ExtractTargetName(target);
-			string archiveFileName = $"{(includeRoot ? "" : "..\\")}{currentTargetName}.7z";
+			var includeRoot = config.IncludeRootDirectory;
+			var currentTargetName = Utils.ExtractTargetName(target);
+			var archiveFileName = $"{(includeRoot ? "" : "..\\")}{currentTargetName}.7z";
 
-			bool errorOccurred = false;
+			var errorOccurred = false;
 
-			Console.WriteLine("<<=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= <*> =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=>>");
-
-			Logger.Info($"{titlePrefix} Start processing \"{target}\"");
+			Log.Debug("+++ Phase sequential execution: {target}", target);
 
 			foreach (Phase phase in phases)
 			{
@@ -439,27 +434,25 @@ namespace Hybrid7z
 				{
 					if (TerminalPhaseInclusion.Contains(target))
 					{
-						string? list = "";
+						var list = "";
 						if (RebuildedFileLists.TryGetValue(currentTargetName, out Dictionary<string, string>? map))
 							list = string.Join(" ", map.Values.ToList().ConvertAll((from) => $"-xr@\"{from}\""));
-						errorOccurred = await phase.PerformPhaseSequential(target, titlePrefix, $"{extraParameters} -r {list} -- \"{archiveFileName}\" \"{(includeRoot ? currentTargetName : "*")}\"") || errorOccurred;
+						errorOccurred = await phase.PerformPhaseSequential(target, _, $"{extraParameters} -r {list} -- \"{archiveFileName}\" \"{(includeRoot ? currentTargetName : "*")}\"") || errorOccurred;
 					}
 					else
 					{
-						Logger.Warn($"Skipped terminal phase({phase.phaseName}) for \"{target}\" because all files are already processed by previous phases");
+						Log.Warning("Terminal phase ({phase}) skip: {target}", phase.phaseName, target);
 					}
 				}
-				else if (RebuildedFileLists.TryGetValue(currentTargetName, out Dictionary<string, string>? map) && map.TryGetValue(phase.phaseName, out string? fileListPath) && fileListPath != null)
+				else if (RebuildedFileLists.TryGetValue(currentTargetName, out Dictionary<string, string>? map) && map.TryGetValue(phase.phaseName, out var fileListPath) && fileListPath != null)
 				{
-					errorOccurred = await phase.PerformPhaseSequential(target, titlePrefix, $"{extraParameters} -ir@\"{fileListPath}\" -- \"{archiveFileName}\"") || errorOccurred;
+					errorOccurred = await phase.PerformPhaseSequential(target, _, $"{extraParameters} -ir@\"{fileListPath}\" -- \"{archiveFileName}\"") || errorOccurred;
 				}
 			}
 
 			Console.WriteLine();
 			Utils.GetCompressionRatio(target, RecursiveEnumeratorOptions, currentTargetName);
-			Logger.Debug($"{titlePrefix} Finished processing {target}");
-
-			Console.WriteLine("<<=-=-=-=-=-=-=-=-=-=-=-=-=-=-= <$> <~> =-=-=-=-=-=-=-=-=-=-=-=-=-=-=>>");
+			Log.Information("+++ Phase sequential execution: {target}", target);
 
 			return errorOccurred;
 		}
