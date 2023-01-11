@@ -96,8 +96,9 @@ internal class PhaseList
 	private async Task<bool> RunSequentialPhases(IEnumerable<SinglePhase> phases, Target target, string indexPrefix, string extraParameters)
 	{
 		var includeRoot = config.IncludeRootDirectory;
-		var sourceName = Path.GetFileName(target.SourcePath);
-		var dest = target.GetDestination(true);
+		var src = target.SourcePath;
+		var srcName = Path.GetFileName(src);
+		var dest = target.GetDestination();
 		var errorOccurred = false;
 
 		Log.Debug("+++ Phase sequential execution: {target}", target);
@@ -106,32 +107,32 @@ internal class PhaseList
 		{
 			if (phase.isTerminal)
 			{
-				if (filterList.TerminalPhaseInclusion.Contains(target.SourcePath))
+				if (filterList.TerminalPhaseInclusion.Contains(src))
 				{
 					var list = "";
-					if (filterList.Rebuilded.TryGetValue(sourceName, out IDictionary<string, string>? map))
+					if (filterList.Rebuilded.TryGetValue(src, out IDictionary<string, string>? map))
 						list = string.Join(' ', map.Values.Select(from => $"-xr@\"{from}\""));
 
-					errorOccurred = await phase.PerformPhaseSequential(target.SourcePath, indexPrefix, $"{extraParameters} {target.GetPasswordParameter(config.PasswordParameterFormat)} -r {list} -- \"{dest}\" \"{(includeRoot ? sourceName : "*")}\"") || errorOccurred;
+					errorOccurred = await phase.PerformPhaseSequential(src, indexPrefix, $"{extraParameters} {target.GetPasswordParameter(config.PasswordParameterFormat)} -r {list} -- \"{dest}\" \"{(includeRoot ? srcName : "*")}\"") || errorOccurred;
 				}
 				else
 				{
 					Log.Warning("Terminal phase ({phase}) skip: {target}", phase.phaseName, target);
 				}
 			}
-			else if (filterList.Rebuilded.TryGetValue(sourceName, out IDictionary<string, string>? map)
+			else if (filterList.Rebuilded.TryGetValue(src, out IDictionary<string, string>? map)
 				&& map.TryGetValue(phase.phaseName, out var fileListPath)
 				&& fileListPath != null)
 			{
 				errorOccurred = await phase.PerformPhaseSequential(
-					target.SourcePath,
+					src,
 					indexPrefix,
 					$"{extraParameters} {target.GetPasswordParameter(config.PasswordParameterFormat)} -ir@\"{fileListPath}\" -- \"{dest}\"") || errorOccurred;
 			}
 		}
 
 		Console.WriteLine();
-		Utils.GetCompressionRatio(target, RecursiveEnumeratorOptions, sourceName);
+		Utils.GetCompressionRatio(target, RecursiveEnumeratorOptions, srcName);
 		Log.Information("+++ Phase sequential execution: {target}", target);
 
 		return errorOccurred;
@@ -146,12 +147,12 @@ internal class PhaseList
 		{
 			await Parallel.ForEachAsync(pairs, async (target, _) =>
 			{
-				var archivePath = target.GetDestination(true);
-				if (filterList.Rebuilded.TryGetValue(target.SourcePath, out var fileListMap)
-					&& fileListMap.TryGetValue(phaseName, out var filterPath)
+				var dest = target.GetDestination();
+				if (filterList.Rebuilded.TryGetValue(target.SourcePath, out IDictionary<string, string>? map)
+					&& map.TryGetValue(phaseName, out var filterPath)
 					&& filterPath is not null
 					&& !await phase.PerformPhaseParallel(target.SourcePath,
-					$"{extraParameters} {target.GetPasswordParameter(config.PasswordParameterFormat)} -ir@\"{filterPath}\" -- \"{archivePath}\""))
+					$"{extraParameters} {target.GetPasswordParameter(config.PasswordParameterFormat)} -ir@\"{filterPath}\" -- \"{dest}\""))
 				{
 					Interlocked.CompareExchange(ref error, 1, 0);
 				}

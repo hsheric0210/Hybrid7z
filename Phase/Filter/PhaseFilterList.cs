@@ -55,17 +55,13 @@ public class PhaseFilterList
 						.Select(path => path.ToUpperInvariant())
 						.ToHashSet());
 
-					var targetName = Path.GetFileName(src);
-					Log.Debug("Phase {phase} filter rebuild: {path}", phaseName, targetName);
-
-					// This will remove all paths(files) matching the specified filter from availableFilesForThisTarget.
-					var filterPath = filter.RebuildFilter(src, $"{targetName}.", PhaseList.RecursiveEnumeratorOptions, files);
+					var filterPath = filter.RebuildFilter(src, $"{src}_{Random.Shared.Next(10, 10000)}.", PhaseList.RecursiveEnumeratorOptions, files);
 
 					// Fail-safe
-					if (!rebuilded.ContainsKey(targetName))
-						rebuilded[targetName] = new Dictionary<string, string>();
+					if (!rebuilded.ContainsKey(src))
+						rebuilded[src] = new Dictionary<string, string>();
 
-					IDictionary<string, string> map = rebuilded[targetName];
+					IDictionary<string, string> map = rebuilded[src];
 					if (filterPath != null)
 						map.Add(phaseName, filterPath);
 					availableFiles[src] = files.TargetFiles;

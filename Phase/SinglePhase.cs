@@ -29,7 +29,9 @@ namespace Hybrid7z.Phase
 
 			try
 			{
-				return await new Archiver(config, phaseName, source, logFolder).Execute(extraParameters) == 0;
+				var errorCode = await new Archiver(config, phaseName, source, logFolder).Execute(extraParameters);
+				Log.Information("Parallel phase of source {src} finished with error code {code}.", source, errorCode);
+				return errorCode == 0;
 			}
 			catch (Exception ex)
 			{

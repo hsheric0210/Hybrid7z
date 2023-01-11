@@ -21,6 +21,7 @@ namespace Hybrid7z
 
 			if (!archiveFileSizeCache.TryGetValue(target.GetDestination(), out var compressedSize))
 			{
+				Log.Debug("Compression ratio of {file}.", target.GetDestination());
 				var file = new FileInfo(target.GetDestination());
 				compressedSize = file.Exists ? file.Length : 0;
 				archiveFileSizeCache[target.GetDestination()] = compressedSize;

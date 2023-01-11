@@ -23,12 +23,13 @@ public class Launch
 
 	public static void Main(params string[] args)
 	{
+		var cwd = AppDomain.CurrentDomain.BaseDirectory;
 		try
 		{
 			Log.Logger = new LoggerConfiguration()
 				.MinimumLevel.Verbose()
 				.WriteTo.Async(a => a.File(
-					DefaultLogFileName,
+					Path.Combine(cwd, DefaultLogFileName),
 					fileSizeLimitBytes: 268435456,
 					buffered: true,
 					flushToDiskInterval: TimeSpan.FromSeconds(2),
@@ -46,7 +47,6 @@ public class Launch
 
 		try
 		{
-			var cwd = AppDomain.CurrentDomain.BaseDirectory;
 			var switchIndex = ParseSwitches(args, out LaunchParameters options);
 			if (switchIndex < 0)
 				return;
