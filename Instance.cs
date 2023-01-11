@@ -10,6 +10,7 @@ namespace Hybrid7z
 			Config config = LoadConfig(options.ConfigFile ?? Path.Combine(cwd, Launch.DefaultConfigFileName));
 			var logFolder = options.LogFolder ?? Path.Combine(cwd, Launch.DefaultLogFolder);
 			var filterFolder = options.PhaseFilterFolder ?? Path.Combine(cwd, ".");
+			var exclusionFilePath = Path.Combine(filterFolder, "Exclude.txt");
 
 			var targetStringList = new List<string>(targetStrings);
 			if (options.BatchFile is not null)
@@ -17,6 +18,9 @@ namespace Hybrid7z
 			ICollection<Target> targetList = await ParseTargets(targetStringList, config.IncludeRootDirectory);
 			var phaseList = new PhaseList(config, logFolder, filterFolder);
 			await phaseList.AddTargets(targetList);
+
+			if (new FileInfo(exclusionFilePath).Exists)
+				phaseList.AddGlobalExclusionListFile(exclusionFilePath);
 
 			Log.Debug("+++ Compression");
 			if (targetList.Count == 0)
