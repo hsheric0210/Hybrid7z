@@ -1,6 +1,8 @@
 ﻿[archiver]
+log_folder = ".\\logs"
 executable = "7z.exe" # Global archiver executable path
-parameters = "a -t7z -mhe -ms=1G -mqs -slp -bt -bb3 -bsp1 -sae -p{ArchivePassword}" # Global archiver execution parameters
+parameters = "a -t7z -mhe -ms=1G -mqs -slp -bt -bb3 -bsp1 -sae" # Global archiver execution parameters
+password_parameter = "-p{Password}"
 
 
 [phase]
@@ -30,6 +32,7 @@ FastLZMA2 = "-m0=FLZMA2 -mx=9 -myx=9 -md=1024m -mfb=273 -mmt=16 -mmtf=on -mlc=4"
 [phase.archiver_override]
 LZMA2 = "7zG.exe"
 Brotli = "7zG.exe"
+
 
 [misc]
 include_root_folder = false # Should the archive includes the root folder?

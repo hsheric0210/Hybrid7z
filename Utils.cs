@@ -11,53 +11,37 @@ namespace Hybrid7z
 		private static readonly Dictionary<string, long> archiveFileSizeCache = new();
 		private static readonly Dictionary<(long, int), string> sizeSuffixCache = new();
 
-		public static bool NoPause
+		public static (long, long) GetCompressionRatio(Target target, EnumerationOptions recursiveEnumeratorOptions, string? targetSimpleName = null)
 		{
-			get; set;
-		}
-
-		public static (long, long) GetCompressionRatio(string target, EnumerationOptions recursiveEnumeratorOptions, string? targetSimpleName = null)
-		{
-			TrimTrailingPathSeparators(ref target);
-
-			if (!originalFilesSizeCache.TryGetValue(target, out var originalSize))
+			if (!originalFilesSizeCache.TryGetValue(target.SourcePath, out var originalSize))
 			{
-				originalSize = new DirectoryInfo(target).GetFiles("*", recursiveEnumeratorOptions).Sum(f => f.Length);
-				originalFilesSizeCache[target] = originalSize;
+				originalSize = new DirectoryInfo(target.SourcePath).GetFiles("*", recursiveEnumeratorOptions).Sum(f => f.Length);
+				originalFilesSizeCache[target.SourcePath] = originalSize;
 			}
 
-			if (!archiveFileSizeCache.TryGetValue(target, out var compressedSize))
+			if (!archiveFileSizeCache.TryGetValue(target.GetDestination(), out var compressedSize))
 			{
-				var file = new FileInfo($"{target}.7z");
+				var file = new FileInfo(target.GetDestination());
 				compressedSize = file.Exists ? file.Length : 0;
-				archiveFileSizeCache[target] = compressedSize;
+				archiveFileSizeCache[target.GetDestination()] = compressedSize;
 			}
 
-			PrintCompressionRatio($"\"{targetSimpleName ?? ExtractTargetName(target)}\":", originalSize, compressedSize);
-
+			PrintCompressionRatio($"\"{targetSimpleName ?? Path.GetFileName(target.SourcePath)}\":", originalSize, compressedSize);
 			return (originalSize, compressedSize);
 		}
 
 		public static void PrintCompressionRatio(string name, long originalSize, long compressedSize)
 		{
-			Log.Information($"DONE: {name} {SizeSuffix(originalSize)} -> {SizeSuffix(compressedSize)} ({(originalSize > 0 ? (compressedSize * 100 / originalSize) : 0)}% compressed)");
+			Log.Information("DONE: {name} {sizeFrom} -> {sizeTo} (size reduction {sizeReduction}%)",
+				name,
+				SizeSuffix(originalSize),
+				SizeSuffix(compressedSize),
+				originalSize > 0 ? (compressedSize * 100 / originalSize) : 0);
 
 			if (originalSize > compressedSize)
-				Log.Information($"DONE: - {name} Saved {SizeSuffix(originalSize - compressedSize)}");
+				Log.Information("DONE: - {name} Saved {sizeReduction}", name, SizeSuffix(originalSize - compressedSize));
 			else
-				Log.Warning($"DONE: - {name} Wasted {SizeSuffix(compressedSize - originalSize)}");
-		}
-
-		public static string ExtractTargetName(string path)
-		{
-			if (targetNameCache.TryGetValue(path, out var targetName))
-				return targetName;
-
-			TrimTrailingPathSeparators(ref path);
-
-			targetName = path[(path.LastIndexOf('\\') + 1)..];
-			targetNameCache.TryAdd(path, targetName);
-			return targetName;
+				Log.Warning("DONE: - {name} Wasted {sizeWasted}", name, SizeSuffix(compressedSize - originalSize));
 		}
 
 		public static string ExtractSuperDirectoryName(string path)
@@ -93,17 +77,6 @@ namespace Hybrid7z
 			255 => "User stopped the process",
 			_ => "",
 		};
-
-		public static void UserInput(string message)
-		{
-			if (NoPause)
-				return;
-			Console.WriteLine(message);
-			string? line;
-			do
-				line = Console.ReadLine();
-			while ((line?.Length ?? 0) <= 0);
-		}
 
 		// https://stackoverflow.com/questions/14488796/does-net-provide-an-easy-way-convert-bytes-to-kb-mb-gb-etc
 

@@ -8,7 +8,7 @@
     <FileVersion>0.0.1.1</FileVersion>
     <ApplicationIcon>7zip.ico</ApplicationIcon>
     <Description>Hybrid7z - Apply different compression algorithms for each file (determinated by user-defined filter)</Description>
-    <StartupObject>Hybrid7z.Hybrid7z</StartupObject>
+    <StartupObject>Hybrid7z.Launch</StartupObject>
     <AnalysisLevel>6.0</AnalysisLevel>
     <Company></Company>
     <PackageProjectUrl>https://github.com/hsheric0210/Hybrid7z</PackageProjectUrl>
