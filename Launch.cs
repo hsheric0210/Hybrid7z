@@ -54,8 +54,10 @@ public class Launch
 			// Check configuration file is exists
 			var configPath = options.ConfigFile ?? cwd + DefaultConfigFileName;
 			if (!File.Exists(configPath))
+			{
 				Log.Warning("Configuration file not found! Writing default configuration file to: {file}", configPath);
-			Config.SaveDefaults(configPath);
+				Config.SaveDefaults(configPath);
+			}
 			// Start the program
 
 			new Instance().Start(cwd, args.Skip(switchIndex).ToList(), options).Wait();

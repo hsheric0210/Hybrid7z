@@ -36,3 +36,5 @@ Brotli = "7zG.exe"
 
 [misc]
 include_root_folder = false # Should the archive includes the root folder?
+delete_archived_path = false # TODO
+delete_filter_cache = true

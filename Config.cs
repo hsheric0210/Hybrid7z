@@ -20,6 +20,8 @@ namespace Hybrid7z
 		public IReadOnlyList<string> PhaseList { get; set; }
 		public bool IncludeRootDirectory { get; set; }
 		public string ArchiverLogFolder { get; set; }
+		public bool DeleteArchivedPath { get; set; }
+		public bool DeleteFilterCache { get; set; }
 
 		public Config(string path)
 		{
@@ -29,6 +31,8 @@ namespace Hybrid7z
 			PasswordParameterFormat = (string)((TomlTable)toml["archiver"])["password_parameter"];
 			PhaseList = ((TomlArray)((TomlTable)toml["phase"])["phase_list"]).Select(o => o?.ToString() ?? "").ToList();
 			IncludeRootDirectory = (bool)((TomlTable)toml["misc"])["include_root_folder"];
+			DeleteArchivedPath = (bool)((TomlTable)toml["misc"])["delete_archived_path"];
+			DeleteFilterCache = (bool)((TomlTable)toml["misc"])["delete_filter_cache"];
 			ArchiverLogFolder = (string)((TomlTable)toml["archiver"])["log_folder"];
 		}
 

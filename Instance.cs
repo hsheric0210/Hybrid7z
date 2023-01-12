@@ -28,9 +28,16 @@ namespace Hybrid7z
 			else if (await phaseList.Process())
 				Log.Warning("At least one error/warning occurred during the progress.");
 			else
+			{
 				Log.Debug("DONE: All files are successfully proceed without any error(s).");
-			await phaseList.DeleteFilterCache(); //TODO: Make configurable
+				if (config.DeleteFilterCache)
+					await phaseList.DeleteFilterCache();
+				if (config.DeleteArchivedPath)
+					await DeleteArchivedPaths(targetList);
+			}
 		}
+
+		private async Task DeleteArchivedPaths(IEnumerable<Target> targetList) => await targetList.ForEachParallel(targetList => Shell32.MoveToRecycleBin(targetList.SourcePath));
 
 		private static Config LoadConfig(string configFile, bool again = false)
 		{
@@ -44,7 +51,9 @@ namespace Hybrid7z
 			{
 				Log.Error(ex, "Exception during config loading. Writing and loading default config file.");
 				if (again) // If it is already default config
-					throw new AggregateException("Base configuration exception");
+					throw new AggregateException("Default configuration exception");
+				else
+					Log.Warning(ex, "Config loading error. Using default config.");
 				File.Move(configFile, configFile + ".bak");
 				Config.SaveDefaults(configFile);
 				return LoadConfig(configFile, true);
