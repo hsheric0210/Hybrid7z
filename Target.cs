@@ -14,21 +14,11 @@ public record Target(string SourcePath, bool IncludeRootFolder, string? Specifie
 		if (!string.IsNullOrWhiteSpace(SpecifiedDestination))
 		{
 			if (!IncludeRootFolder && !Path.IsPathFullyQualified(SpecifiedDestination))
-				return Path.Combine(GetDirectoryName(SpecifiedDestination)!, "..", Path.GetFileName(SpecifiedDestination));
+				return Path.Combine(PathUtils.GetParentDirectory(Path.GetFullPath(SpecifiedDestination)), Path.GetFileName(SpecifiedDestination));
 			return SpecifiedDestination;
 		}
 
-		var path = GetDirectoryName(SourcePath) ?? "";
-		if (!IncludeRootFolder)
-			path = Path.Combine(path, "..");
-		return Path.Combine(path, Path.GetFileName(SourcePath) + ".7z");
-	}
-
-	private static string GetDirectoryName(string path)
-	{
-		if (new FileInfo(path).Exists)
-			return Path.GetDirectoryName(path)!; // containing directory of the file
-		return path; // it is directory as itself
+		return Path.GetFullPath(Path.Combine(PathUtils.GetParentDirectory(PathUtils.GetDirectory(SourcePath)), Path.GetFileName(SourcePath) + ".7z"));
 	}
 
 	public string GetPasswordParameter(string paramFormat) => Password is not null ? paramFormat.FormatToken(new { Password }) : "";

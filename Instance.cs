@@ -76,8 +76,7 @@ namespace Hybrid7z
 					}
 					else if (File.Exists(path[0]))
 					{
-						// FIXME: File support
-						Log.Warning("Currently, file are not supported (only directories are supported): {path}", path);
+						Log.Warning("File are not supported (only directories are supported): {path}", path);
 					}
 					else
 					{

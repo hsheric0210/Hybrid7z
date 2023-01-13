@@ -67,7 +67,7 @@ public class PhaseFilter
 		{
 			try
 			{
-				if (!filter.Contains('\\') || Directory.Exists(Path.Combine(path, Utils.ExtractSuperDirectoryName(filter))))
+				if (!filter.Contains('\\') || Directory.Exists(Path.Combine(path, PathUtils.GetParentDirectory(filter))))
 				{
 					IEnumerable<string> files = Directory.EnumerateFiles(path, filter, recursiveEnumeratorOptions);
 					if (files.Any())

@@ -37,7 +37,7 @@ internal class Archiver
 	{
 		Process archiver = new();
 		archiver.StartInfo.FileName = config.Get7zExecutable(phaseName);
-		archiver.StartInfo.WorkingDirectory = Path.GetFullPath(config.IncludeRootDirectory ? Utils.ExtractSuperDirectoryName(targetPath) : targetPath) + Path.DirectorySeparatorChar;
+		archiver.StartInfo.WorkingDirectory = Path.GetFullPath(config.IncludeRootDirectory ? PathUtils.GetParentDirectory(targetPath) : targetPath) + Path.DirectorySeparatorChar;
 		archiver.StartInfo.Arguments = $"{config.GlobalArchiverParameters} {config.GetPhaseSpecificParameters(phaseName)} {extraParameters}";
 		archiver.StartInfo.UseShellExecute = false;
 		archiver.StartInfo.RedirectStandardOutput = true;

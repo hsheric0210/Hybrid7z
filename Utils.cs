@@ -5,8 +5,6 @@ namespace Hybrid7z
 {
 	public static class Utils
 	{
-		private static readonly ConcurrentDictionary<string, string> targetNameCache = new();
-		private static readonly ConcurrentDictionary<string, string> superNameCache = new();
 		private static readonly Dictionary<string, long> originalFilesSizeCache = new();
 		private static readonly Dictionary<string, long> archiveFileSizeCache = new();
 		private static readonly Dictionary<(long, int), string> sizeSuffixCache = new();
@@ -43,24 +41,6 @@ namespace Hybrid7z
 				Log.Information("DONE: - {name} Saved {sizeReduction}", name, SizeSuffix(originalSize - compressedSize));
 			else
 				Log.Warning("DONE: - {name} Wasted {sizeWasted}", name, SizeSuffix(compressedSize - originalSize));
-		}
-
-		public static string ExtractSuperDirectoryName(string path)
-		{
-			if (superNameCache.TryGetValue(path, out var superName))
-				return superName;
-
-			TrimTrailingPathSeparators(ref path);
-
-			superName = path[..(path.LastIndexOf('\\') + 1)];
-			superNameCache.TryAdd(path, superName);
-			return superName;
-		}
-
-		public static void TrimTrailingPathSeparators(ref string path)
-		{
-			while (path.EndsWith('\\'))
-				path = path[0..^1]; // Drop last char
 		}
 
 		public static void TrimLeadingPathSeparators(ref string path)
